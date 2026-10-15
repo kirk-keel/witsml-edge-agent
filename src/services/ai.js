@@ -1,4 +1,4 @@
-﻿const { ChatOpenAI } = require("@langchain/openai");
+﻿const { ChatOllama } = require("@langchain/ollama");
 const { PromptTemplate } = require("@langchain/core/prompts");
 const { StructuredOutputParser } = require("@langchain/core/output_parsers");
 const { z } = require("zod");
@@ -15,12 +15,14 @@ const outputParser = StructuredOutputParser.fromZodSchema(
 );
 
 async function analyzeRigStateAsync(data) {
-    console.log(`[Agent Queue] Orchestrating ILT analysis for ${data.metadata.rig_id}...`);
+    console.log(`[Agent Queue] Orchestrating ILT analysis via local homelab for ${data.metadata.rig_id}...`);
 
     try {
-        const model = new ChatOpenAI({
-            modelName: process.env.OPENAI_MODEL_NAME || "gpt-4o-mini",
-            temperature: 0.1, 
+        const model = new ChatOllama({
+            baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+            model: process.env.OLLAMA_MODEL_NAME || "llama3.1",
+            temperature: 0.1,
+            format: "json", // Forces Ollama to strictly adhere to the JSON structure
         });
 
         const prompt = new PromptTemplate({
@@ -49,11 +51,11 @@ Telemetry Array: {telemetry_data}`,
         });
 
         console.log(`[AI Assessment] ILT Detected: ${result.is_ilt} | Reason: ${result.justification}`);
-        logAiDecision(data.metadata, "est-150-tokens", result);
+        logAiDecision(data.metadata, "local-compute-0-cost", result);
         
         return result;
     } catch (error) {
-        console.error("[Agent Error] Failed to process:", error);
+        console.error("[Agent Error] Failed to process via local model:", error);
     }
 }
 
