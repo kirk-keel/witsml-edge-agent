@@ -1,61 +1,63 @@
-﻿const { ChatOllama } = require("@langchain/ollama");
+const { ChatOllama } = require("@langchain/ollama");
 const { PromptTemplate } = require("@langchain/core/prompts");
 const { StructuredOutputParser } = require("@langchain/core/output_parsers");
 const { z } = require("zod");
+const fs = require('fs');
+const path = require('path');
 const { logAiDecision } = require('../utils/logger');
 
 const outputParser = StructuredOutputParser.fromZodSchema(
     z.object({
-        actual_state: z.string().describe("The true rig state based on physics (e.g., 'drilling', 'connection', 'stationary')."),
-        is_ilt: z.boolean().describe("True if Invisible Lost Time occurred."),
-        ilt_duration_seconds: z.number().describe("Estimated duration of the ILT in seconds."),
-        confidence_score: z.number().min(0).max(100),
-        justification: z.string().describe("Engineering justification for the classification.")
+        actual_state: z.string(),
+        is_ilt: z.boolean(),
+        ilt_duration_seconds: z.number(),
+        confidence_score: z.number(),
+        justification: z.string().describe("Strict engineering logic. State the exact numeric comparisons factually without hallucinating (e.g., 'Actual WOB 18 is > min 5 required').")
     })
 );
 
 async function analyzeRigStateAsync(data) {
-    console.log(`[Agent Queue] Orchestrating ILT analysis via local homelab for ${data.metadata.rig_id}...`);
-
     try {
+        const configPath = path.join(__dirname, '../sop-config.json');
+        const sopConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
         const model = new ChatOllama({
             baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
-            model: process.env.OLLAMA_MODEL_NAME || "llama3.1",
-            temperature: 0.1,
-            format: "json", // Forces Ollama to strictly adhere to the JSON structure
+            model: "llama3.1", // Hardcoded to bypass Qwen 3B and enforce Llama 3.1 8B
+            temperature: 0,
+            format: "json"
         });
 
         const prompt = new PromptTemplate({
-            template: `You are an expert Well Control Specialist and Rig Optimization AI.
-Analyze the following 5-minute WITSML telemetry window downsampled to 10-second intervals.
-
-### Operating Rules:
-1. Drilling: Requires WOB > 5 klbs, RPM > 20, and Flow > 100.
-2. Slip-to-Slip Connections: Max 180 seconds. If block is stationary and Flow is 0 for > 180s, flag as ILT.
-3. Trust physics over the declared state.
-
-### Output Instructions:
-{format_instructions}
+            template: `Analyze this WITSML telemetry against the Operating Rules.
+### Rules:
+1. Drilling: WOB > {min_wob}, RPM > {min_rpm}, Flow > {min_flow}.
+2. Connection: Max {max_conn_time}s.
 
 ### Payload:
-Declared Operation: {declared_op}
-Telemetry Array: {telemetry_data}`,
-            inputVariables: ["declared_op", "telemetry_data"],
-            partialVariables: { format_instructions: outputParser.getFormatInstructions() },
+Declared: {declared_op}
+Telemetry: {telemetry_data}
+
+### Output:
+Output raw JSON. Your 'justification' field must strictly state the factual math (e.g., 'Actual Flow 400 is > required 100'). Do not contradict the telemetry.`,
+            inputVariables: ["declared_op", "telemetry_data", "min_wob", "min_rpm", "min_flow", "max_conn_time"]
         });
 
         const chain = prompt.pipe(model).pipe(outputParser);
         const result = await chain.invoke({
             declared_op: data.metadata.active_operation,
-            telemetry_data: JSON.stringify(data.telemetry)
+            telemetry_data: JSON.stringify(data.telemetry),
+            min_wob: sopConfig.min_wob,
+            min_rpm: sopConfig.min_rpm,
+            min_flow: sopConfig.min_flow,
+            max_conn_time: sopConfig.max_conn_time
         });
 
-        console.log(`[AI Assessment] ILT Detected: ${result.is_ilt} | Reason: ${result.justification}`);
+        if (global.broadcastToDashboard) global.broadcastToDashboard(result);
         logAiDecision(data.metadata, "local-compute-0-cost", result);
-        
         return result;
     } catch (error) {
-        console.error("[Agent Error] Failed to process via local model:", error);
+        console.error(error);
     }
 }
 
