@@ -1,45 +1,56 @@
 # WITSML Edge Agent
 
-Real-time WITSML drilling telemetry analysis with local LLM inference — ILT detection, live dashboard, zero cloud cost.
+Real-time WITSML drilling telemetry analysis with local LLM inference — Invisible Lost Time (ILT) detection, live SSE dashboard, and zero cloud cost.
 
 ## What it is
 
-An Express service that ingests WITSML-style telemetry, analyzes it with a locally-hosted LLM (LangChain + Ollama), and streams results to a live dashboard over Server-Sent Events. SOP thresholds are configurable at runtime — no redeploy.
+An Express service that ingests WITSML-style drilling telemetry, validates sensor windows with strict Zod schemas, analyzes operations against runtime-configurable Standard Operating Procedures (SOPs) using a locally hosted LLM (LangChain + Ollama), and streams structured assessments to a live dashboard over Server-Sent Events (SSE). SOP thresholds are configurable at runtime — no redeploy required.
 
 ## Why it exists
 
-Invisible Lost Time is drilling time lost to inefficiency that nobody flags in the moment. Cloud LLM analysis is expensive and rate-limited; this runs entirely on homelab hardware over Tailscale, for free.
+Invisible Lost Time (ILT) is drilling and connection time lost to operational inefficiency that goes unflagged in the moment. Cloud LLM analysis introduces satellite latency, data egress risks, and token costs; this edge agent runs entirely on local rig/homelab hardware over Tailscale, for free.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    S[WITSML Simulator] -->|POST /api/witsml| A[Express Agent]
-    A -->|202 Accepted| S
-    A --> L[LangChain + Ollama]
-    L --> Z[Zod-validated JSON]
-    Z -->|SSE /api/stream| D[Live Dashboard]
-    C[SOP Config API] -.-> A
-cd ~/repos/witsml-edge-agent
+    S["WITSML Simulator / Edge Aggregator"] -->|"POST /api/v1/telemetry"| R["Zod Schema Validator"]
+    R -->|"202 Accepted"| S
+    R --> A["AI Service (LangChain + Ollama)"]
+    C["SOP Config API (/api/sops)"] -.->|"Runtime Thresholds"| A
+    A --> Z["Zod-Validated Structured Output"]
+    Z -->|"EventEmitter -> SSE (/api/stream)"| D["Live Rig Dashboard"]
+    Z --> L["Append-Only JSONL Audit Log"]
+```
 
-python3 - <<'PY'
-import json, pathlib
-p = pathlib.Path("package.json")
-d = json.loads(p.read_text())
-d["name"] = "witsml-edge-agent"
-d["description"] = "Real-time WITSML telemetry analysis with local LLM inference"
-d["license"] = "MIT"
-d["scripts"]["test"] = "node --test test/"
-p.write_text(json.dumps(d, indent=2) + "\n")
-print("package.json patched")
-PY
+## Quick Start
 
-mkdir -p test
-cat > test/smoke.test.js <<'EOF'
-const test = require('node:test');
-const assert = require('node:assert');
+```bash
+git clone https://github.com/kirk-keel/witsml-edge-agent.git
+cd witsml-edge-agent
+cp .env.example .env
+npm install
+npm start
+```
 
-test('logger module loads', () => {
-  const logger = require('../src/utils/logger');
-  assert.ok(logger);
-});
+### Simulate WITSML Telemetry
+
+```bash
+node scripts/test-payload.js
+# or run the multi-window stream simulator:
+node stream-simulator.js
+```
+
+## Endpoints
+
+| Method | Path | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/telemetry` | Schema-validated WITSML window ingestion (`202 Accepted`) |
+| `POST` | `/api/witsml` | Legacy alias forwarded to the telemetry ingestion pipeline |
+| `GET` | `/api/sops` | Retrieve active SOP thresholds (returns safe in-memory defaults if uninitialized) |
+| `POST` | `/api/sops` | Update runtime SOP thresholds (`min_wob`, `min_rpm`, `min_flow`, `max_conn_time`) |
+| `GET` | `/api/stream` | Server-Sent Events (SSE) stream for live dashboard updates |
+
+## License
+
+MIT — see [LICENSE](LICENSE).

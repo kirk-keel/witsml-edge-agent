@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const { z } = require('zod');
 const { analyzeRigStateAsync } = require('../services/ai');
 
@@ -26,15 +26,18 @@ const telemetrySchema = z.object({
     })).min(1)
 });
 
-router.post('/api/v1/telemetry', async (req, res) => {
+async function handleTelemetryIngestion(req, res) {
     try {
         const validatedData = telemetrySchema.parse(req.body);
+        console.log(`[Agent] Received telemetry payload for ${validatedData.metadata.rig_id} (${validatedData.metadata.well_id})`);
+
         analyzeRigStateAsync(validatedData);
 
-        return res.status(202).json({ 
-            status: 'accepted', 
+        return res.status(202).json({
+            status: 'accepted',
             message: 'Telemetry batch queued for AI analysis',
-            well_id: validatedData.metadata.well_id
+            well_id: validatedData.metadata.well_id,
+            rig_id: validatedData.metadata.rig_id
         });
     } catch (error) {
         if (error instanceof z.ZodError) {
@@ -42,6 +45,9 @@ router.post('/api/v1/telemetry', async (req, res) => {
         }
         return res.status(500).json({ status: 'error', message: 'Server error' });
     }
-});
+}
 
-module.exports = router;
+router.post('/api/v1/telemetry', handleTelemetryIngestion);
+router.post('/api/witsml', handleTelemetryIngestion);
+
+module.exports = { router, telemetrySchema };

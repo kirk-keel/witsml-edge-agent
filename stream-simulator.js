@@ -1,23 +1,45 @@
 const http = require('http');
 
+const PORT = process.env.PORT || 3000;
+
+function makeWindow(activeOperation, points) {
+    const start = Date.now();
+    return {
+        metadata: {
+            well_id: "WL-9924",
+            rig_id: "Rig-412",
+            window_start: new Date(start).toISOString(),
+            window_end: new Date(start + 5 * 60000).toISOString(),
+            interval_seconds: 10,
+            active_operation: activeOperation
+        },
+        telemetry: points.map((pt, i) => ({
+            timestamp: new Date(start + i * 10000).toISOString(),
+            hole_depth_ft: pt.depth,
+            bit_depth_ft: pt.depth,
+            block_pos_ft: pt.block_pos,
+            hook_load_klbs: pt.hook_load ?? 240.0,
+            wob_klbs: pt.wob,
+            spp_psi: pt.spp ?? 2850,
+            flow_in_gpm: pt.flow,
+            rpm: pt.rpm
+        }))
+    };
+}
+
 const payloads = [
-    {
-        metadata: { rig_id: "Rig-412", active_operation: "drilling" },
-        telemetry: [{ depth: 10000, wob: 15, rpm: 120, flow: 400, block_pos: 90, slips: false }]
-    },
-    {
-        metadata: { rig_id: "Rig-412", active_operation: "drilling" },
-        telemetry: [{ depth: 10030, wob: 18, rpm: 125, flow: 405, block_pos: 60, slips: false }]
-    },
-    {
-        metadata: { rig_id: "Rig-412", active_operation: "connection" },
-        telemetry: [
-            // Simulating multiple data points over 180 seconds with pumps off and slips set
-            { depth: 10060, wob: 0, rpm: 0, flow: 0, block_pos: 10, slips: true },
-            { depth: 10060, wob: 0, rpm: 0, flow: 0, block_pos: 10, slips: true },
-            { depth: 10060, wob: 0, rpm: 0, flow: 0, block_pos: 10, slips: true }
-        ]
-    }
+    makeWindow("drilling", [
+        { depth: 10000, wob: 15, rpm: 120, flow: 400, block_pos: 90 }
+    ]),
+    makeWindow("drilling", [
+        { depth: 10030, wob: 18, rpm: 125, flow: 405, block_pos: 60 }
+    ]),
+    makeWindow("connection", [
+        // Simulating multiple data points over 180 seconds with pumps off and slips set
+        { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 },
+        { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 },
+        { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 }
+    ])
 ];
 
 async function sendPayload(data, scenario) {
@@ -25,8 +47,8 @@ async function sendPayload(data, scenario) {
     const postData = JSON.stringify(data);
     const options = {
         hostname: 'localhost',
-        port: 3101, // Pointing to your externally mapped Docker port
-        path: '/api/witsml',
+        port: PORT,
+        path: '/api/v1/telemetry',
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
     };
@@ -55,4 +77,6 @@ async function run() {
     await sendPayload(payloads[2], "ilt_connection");
 }
 
-run();
+if (require.main === module) {
+    run();
+}
