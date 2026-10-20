@@ -1,0 +1,91 @@
+
+# 2026-10-20 08:47:12.135763
++Y
+
+# 2026-10-20 08:47:19.062027
++Read this repository carefully. Rewrite README.md with: a one-line pitch, a What/Why section, an Architecture section with a Mermaid diagram, a Quick Start with exact commands, how to run the tests with the synthetic WITSML data, a "Part of a 3-repo system" note linking to witsml-agent and sop-rag-judge, and a License section. Read the actual code — don't invent features.
+
+# 2026-10-20 08:48:00.451562
++Y
+
+# 2026-10-20 08:54:02.835907
++y
+
+# 2026-10-20 08:54:29.992753
++# in aider: /model ollama_chat/hf.co/Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-GGUF:Q4_K_M
+
+# 2026-10-20 08:54:35.150993
++clear
+
+# 2026-10-20 08:55:38.181479
++y
+
+# 2026-10-20 08:56:15.702337
++Read this repository carefully. Rewrite README.md. Requirements:
++
++    One-line pitch, then a What/Why section
++    An Architecture section with a properly fenced ```mermaid diagram
++    Quick Start with exact, single-set-of commands
++    A "Running Tests" section using the synthetic WITSML data
++    A "Part of a 3-repo system" section linking witsml-agent and sop-rag-judge
++    License section
++    Repo URL is kirk-keel/witsml-edge-agent
++    Use ## headers for every section
++    Read the actual code — don't invent features
+
+# 2026-10-20 08:56:20.253335
++y
+
+# 2026-10-20 09:21:21.134214
++cat > ~/tools/draft_readme.py <<'PYEOF'
++import json, os, sys, urllib.request
++from pathlib import Path
++
++OLLAMA = os.environ.get("OLLAMA_API_BASE", "http://localhost:11434")
++MODEL = os.environ.get("TRIAGE_MODEL", "llama3.1:latest")
++p = Path(sys.argv[1]).resolve()
++
++skip = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist"}
++files = [f for f in sorted(p.rglob("*"))
++         if f.is_file() and not any(s in f.parts for s in skip)][:120]
++tree = [str(f.relative_to(p)) for f in files]
++body = {}
++for f in files:
++    if f.suffix in {".js", ".ts", ".py", ".json", ".yml"} and f.name != "README.md":
++        try:
++            body[str(f.relative_to(p))] = f.read_text(errors="ignore")[:3500]
++        except Exception:
++            pass
++
++prompt = f"""Repo: {p.name}
++Files:
++{json.dumps(tree, indent=1)}
++
++Contents:
++{json.dumps(body, indent=1)[:22000]}
++
++Write a complete README.md. Output ONLY markdown, no preamble.
++Sections with ## headers: one-line pitch, What/Why, Architecture (include a
++properly fenced ```mermaid diagram), Quick Start, Running Tests, Part of a
++3-repo system (link witsml-agent and sop-rag-judge), License.
++Repo URL is kirk-keel/{p.name}. Read the code, don't invent features."""
++
++payload = {"model": MODEL, "stream": False, "options": {"num_ctx": 16384},
++           "messages": [{"role": "system", "content": "You write excellent READMEs."},
++                        {"role": "user", "content": prompt}]}
++req = urllib.request.Request(f"{OLLAMA}/api/chat",
++        data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
++with urllib.request.urlopen(req, timeout=900) as r:
++    text = json.loads(r.read())["message"]["content"].strip()
++Path(p / "README.md").write_text(text + "\n")
++print(text)
++PYEOF
+
+# 2026-10-20 09:21:27.715984
++y
+
+# 2026-10-20 09:22:08.296102
++n
+
+# 2026-10-20 09:22:13.813746
++exit
