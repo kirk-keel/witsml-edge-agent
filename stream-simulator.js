@@ -1,6 +1,6 @@
-const http = require('http');
+const http = require('https');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 443;
 
 function makeWindow(activeOperation, points) {
     const start = Date.now();
@@ -46,7 +46,7 @@ async function sendPayload(data, scenario) {
     console.log(`\n[Simulator] Dispatching 5-minute window. Scenario: ${scenario}`);
     const postData = JSON.stringify(data);
     const options = {
-        hostname: 'localhost',
+        hostname: 'agent.kcklayton.com',
         port: PORT,
         path: '/api/v1/telemetry',
         method: 'POST',
