@@ -10,4 +10,4 @@ services:
       - ./src:/usr/src/app/src
     env_file:
       - .env
-    command: npm run dev
+    command: node src/index.js
