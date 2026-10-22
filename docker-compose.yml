@@ -1,13 +1,46 @@
 version: '3.8'
 
 services:
-  agent-api:
+  witsml-agent:
     build: .
     container_name: witsml-agent
+    restart: always
     ports:
       - "3000:3000"
+    environment:
+      - PORT=3000
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - DB_HOST=timescaledb
     volumes:
-      - ./src:/usr/src/app/src
-    env_file:
-      - .env
-    command: node src/index.js
+      - ./logs:/usr/src/app/logs
+    depends_on:
+      - timescaledb
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: timescaledb
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=witsml_secure_pw
+      - POSTGRES_DB=witsml_telemetry
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+
+volumes:
+  pgdata:
+  prometheus_data:
