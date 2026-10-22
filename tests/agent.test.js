@@ -113,6 +113,37 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(compacted.points_count, 10);
         assert.equal(compacted.window_averages.wob_klbs, 20);
         assert.equal(compacted.window_averages.flow_in_gpm, 400);
+
+        const drillingDysfunction = evaluateSopDeterministic(
+            {
+                metadata: {
+                    active_operation: 'drilling',
+                    window_start: new Date(start).toISOString(),
+                    window_end: new Date(start + 300000).toISOString(),
+                    interval_seconds: 10
+                },
+                telemetry: [{ wob_klbs: 2, rpm: 10, flow_in_gpm: 80 }]
+            },
+            DEFAULT_SOP_CONFIG
+        );
+        assert.equal(drillingDysfunction.is_ilt, true);
+        assert.equal(drillingDysfunction.actual_state, 'drilling_dysfunction');
+        assert.equal(drillingDysfunction.ilt_duration_seconds, 180);
+
+        const circulatingLoss = evaluateSopDeterministic(
+            {
+                metadata: {
+                    active_operation: 'circulating',
+                    window_start: new Date(start).toISOString(),
+                    window_end: new Date(start + 300000).toISOString(),
+                    interval_seconds: 10
+                },
+                telemetry: [{ wob_klbs: 0, rpm: 0, flow_in_gpm: 40 }]
+            },
+            DEFAULT_SOP_CONFIG
+        );
+        assert.equal(circulatingLoss.is_ilt, true);
+        assert.equal(circulatingLoss.actual_state, 'circulation_loss');
     });
 
     it('GET and POST /api/sops manage runtime SOP thresholds', async () => {
@@ -217,11 +248,16 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         );
     });
 
-    it('GET /api/decisions and GET /api/stats return structured responses', async () => {
-        const decRes = await fetch(`${baseUrl}/api/decisions?limit=5`);
+    it('GET /api/decisions, GET /api/batches, GET /api/stats, and GET /ready return structured responses', async () => {
+        const decRes = await fetch(`${baseUrl}/api/decisions?limit=5&is_ilt=true&rig_id=Rig-412`);
         assert.equal(decRes.status, 200);
         const decBody = await decRes.json();
         assert.ok(Array.isArray(decBody.decisions));
+
+        const batchRes = await fetch(`${baseUrl}/api/batches?limit=5&rig_id=Rig-412`);
+        assert.equal(batchRes.status, 200);
+        const batchBody = await batchRes.json();
+        assert.ok(Array.isArray(batchBody.batches));
 
         const statsRes = await fetch(`${baseUrl}/api/stats`);
         assert.equal(statsRes.status, 200);
@@ -229,5 +265,12 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(typeof statsBody.total_batches, 'number');
         assert.equal(typeof statsBody.total_decisions, 'number');
         assert.equal(typeof statsBody.queue?.total_pending, 'number');
+
+        const readyRes = await fetch(`${baseUrl}/ready`);
+        assert.equal(readyRes.status, 200);
+        const readyBody = await readyRes.json();
+        assert.ok(['ready', 'degraded'].includes(readyBody.status));
+        assert.equal(typeof readyBody.timescaledb?.ok, 'boolean');
+        assert.equal(typeof readyBody.ollama?.ok, 'boolean');
     });
 });

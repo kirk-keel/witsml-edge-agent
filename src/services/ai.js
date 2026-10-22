@@ -151,6 +151,26 @@ function evaluateSopDeterministic(data, sopConfig) {
         };
     }
 
+    if (declaredOp === 'circulating') {
+        const flowOk = avgFlow >= sopConfig.min_flow;
+        const isIlt = !flowOk;
+        const flowCmp = flowOk ? '>' : '<';
+        const factualJustification =
+            `Circulation check: Actual Flow ${avgFlow} is ${flowCmp} min ${sopConfig.min_flow} required (Actual WOB ${avgWob}, RPM ${avgRpm}).`;
+
+        return {
+            declared_op: declaredOp,
+            actual_state: isIlt ? 'circulation_loss' : 'circulating',
+            is_ilt: isIlt,
+            ilt_duration_seconds: isIlt ? Math.min(windowSpanSec, sopConfig.max_conn_time) : 0,
+            avg_wob: avgWob,
+            avg_rpm: avgRpm,
+            avg_flow: avgFlow,
+            summary: factualJustification,
+            factual_justification: factualJustification
+        };
+    }
+
     const factualJustification = `Operation ${declaredOp}: Actual WOB ${avgWob}, RPM ${avgRpm}, Flow ${avgFlow}.`;
     return {
         declared_op: declaredOp,
@@ -405,11 +425,33 @@ function analyzeRigStateAsync(data) {
     });
 }
 
+async function checkOllamaHealth() {
+    const baseUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || "http://localhost:11434";
+    const modelName = process.env.OLLAMA_MODEL_NAME || "qwen2.5:1.5b";
+    const start = Date.now();
+    try {
+        const res = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(2500) });
+        return {
+            ok: res.ok,
+            model: modelName,
+            latency_ms: Date.now() - start
+        };
+    } catch (err) {
+        return {
+            ok: false,
+            model: modelName,
+            latency_ms: Date.now() - start,
+            error: err.message
+        };
+    }
+}
+
 module.exports = {
     analyzeRigStateAsync,
     evaluateSopDeterministic,
     sanitizeJustification,
     compactTelemetryForPrompt,
+    checkOllamaHealth,
     getQueueStatus,
     telemetryEvents,
     getSopConfig,

@@ -1,8 +1,20 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { telemetryEvents, getSopConfig, updateSopConfig, getQueueStatus } = require('./services/ai');
-const { pool, getRecentAiDecisions, getTelemetryStats } = require('./services/db');
+const {
+    telemetryEvents,
+    getSopConfig,
+    updateSopConfig,
+    getQueueStatus,
+    checkOllamaHealth
+} = require('./services/ai');
+const {
+    pool,
+    getRecentAiDecisions,
+    getRecentTelemetryBatches,
+    checkDbHealth,
+    getTelemetryStats
+} = require('./services/db');
 const { router: telemetryRouter } = require('./routes/telemetry');
 const { register } = require('./utils/metrics');
 
@@ -10,9 +22,22 @@ const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-// --- HEALTH CHECK ---
+// --- HEALTH & READINESS CHECKS ---
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'healthy', service: 'witsml-edge-agent' });
+});
+
+app.get('/ready', async (req, res) => {
+    const [timescaledb, ollama] = await Promise.all([
+        checkDbHealth(),
+        checkOllamaHealth()
+    ]);
+    res.status(200).json({
+        status: timescaledb.ok && ollama.ok ? 'ready' : 'degraded',
+        timescaledb,
+        ollama,
+        queue: getQueueStatus()
+    });
 });
 
 // --- PROMETHEUS METRICS ---
@@ -38,8 +63,21 @@ app.post('/api/sops', (req, res) => {
 });
 
 app.get('/api/decisions', async (req, res) => {
-    const decisions = await getRecentAiDecisions(req.query.limit);
+    const decisions = await getRecentAiDecisions({
+        limit: req.query.limit,
+        rig_id: req.query.rig_id,
+        well_id: req.query.well_id,
+        is_ilt: req.query.is_ilt
+    });
     res.json({ decisions });
+});
+
+app.get('/api/batches', async (req, res) => {
+    const batches = await getRecentTelemetryBatches({
+        limit: req.query.limit,
+        rig_id: req.query.rig_id
+    });
+    res.json({ batches });
 });
 
 app.get('/api/stats', async (req, res) => {

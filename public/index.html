@@ -6,21 +6,36 @@
     <style>
         * { box-sizing: border-box; }
         body { background: #0f172a; color: #38bdf8; font-family: monospace; padding: 20px; margin: 0; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 12px; }
+        .header-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
         .header h2 { margin: 0; }
-        .header-actions { display: flex; gap: 10px; align-items: center; }
-        .btn-action { background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold; text-decoration: none; width: auto; }
+        .badge { font-size: 11px; padding: 4px 8px; border-radius: 999px; background: #1e293b; border: 1px solid #475569; color: #94a3b8; }
+        .badge.online { border-color: #10b981; color: #10b981; }
+        .badge.offline { border-color: #f59e0b; color: #f59e0b; }
+        .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .btn-action { background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold; text-decoration: none; width: auto; font-size: 12px; }
         .btn-action:hover { background: #0284c7; color: #fff; }
         .btn-warn { border-color: #f59e0b; color: #f59e0b; }
         .btn-warn:hover { background: #d97706; color: #fff; }
-        .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 20px; }
-        .kpi-card { background: #1e293b; border: 1px solid #334155; padding: 14px; border-radius: 8px; text-align: center; }
-        .kpi-label { color: #94a3b8; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; }
-        .kpi-value { font-size: 24px; font-weight: bold; color: #f8fafc; }
+        .btn-danger { border-color: #ef4444; color: #ef4444; }
+        .btn-danger:hover { background: #dc2626; color: #fff; }
+        .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
+        .kpi-card { background: #1e293b; border: 1px solid #334155; padding: 12px; border-radius: 8px; text-align: center; }
+        .kpi-label { color: #94a3b8; font-size: 11px; margin-bottom: 4px; text-transform: uppercase; }
+        .kpi-value { font-size: 22px; font-weight: bold; color: #f8fafc; }
         .kpi-value.ilt { color: #ef4444; }
         .kpi-value.ok { color: #10b981; }
+        .edr-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 18px; background: #0b1120; border: 1px solid #1e293b; padding: 10px 14px; border-radius: 8px; }
+        .edr-cell { text-align: center; }
+        .edr-name { font-size: 10px; color: #64748b; text-transform: uppercase; }
+        .edr-val { font-size: 15px; color: #38bdf8; font-weight: bold; margin-top: 2px; }
         .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
         .panel { background: #1e293b; border: 1px solid #334155; padding: 20px; border-radius: 8px; }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .panel-header h3 { margin: 0; }
+        .filter-group { display: flex; gap: 6px; }
+        .btn-filter { background: #0f172a; color: #94a3b8; border: 1px solid #334155; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px; }
+        .btn-filter.active { background: #0284c7; color: #fff; border-color: #38bdf8; }
         input { background: #0f172a; color: #10b981; border: 1px solid #475569; padding: 8px; width: 100%; margin-bottom: 15px; font-family: monospace; }
         button.primary { background: #0284c7; color: white; border: none; padding: 10px 15px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; font-family: monospace; }
         button.primary:hover { background: #0369a1; }
@@ -31,10 +46,15 @@
 </head>
 <body>
     <div class="header">
-        <h2>WITSML Edge AI | Rig-412</h2>
+        <div class="header-left">
+            <h2>WITSML Edge AI | Rig-412</h2>
+            <span class="badge" id="badge-db">TimescaleDB: checking...</span>
+            <span class="badge" id="badge-ollama">Ollama: checking...</span>
+        </div>
         <div class="header-actions">
-            <button class="btn-action" onclick="simulateWindow('drilling')">+ Simulate Drilling Window</button>
-            <button class="btn-action btn-warn" onclick="simulateWindow('connection')">+ Simulate Connection ILT</button>
+            <button class="btn-action" onclick="simulateWindow('drilling')">+ Normal Drilling</button>
+            <button class="btn-action btn-danger" onclick="simulateWindow('dysfunction')">+ Drilling Dysfunction ILT</button>
+            <button class="btn-action btn-warn" onclick="simulateWindow('connection')">+ Connection ILT</button>
             <a class="btn-action" id="grafana-link" target="_blank" rel="noopener">Open Grafana (:3001)</a>
         </div>
     </div>
@@ -62,6 +82,16 @@
         </div>
     </div>
 
+    <div class="edr-strip">
+        <div class="edr-cell"><div class="edr-name">Active Op</div><div class="edr-val" id="edr-op">--</div></div>
+        <div class="edr-cell"><div class="edr-name">Hole Depth</div><div class="edr-val" id="edr-depth">-- ft</div></div>
+        <div class="edr-cell"><div class="edr-name">WOB</div><div class="edr-val" id="edr-wob">-- klbs</div></div>
+        <div class="edr-cell"><div class="edr-name">RPM</div><div class="edr-val" id="edr-rpm">--</div></div>
+        <div class="edr-cell"><div class="edr-name">Flow In</div><div class="edr-val" id="edr-flow">-- gpm</div></div>
+        <div class="edr-cell"><div class="edr-name">SPP</div><div class="edr-val" id="edr-spp">-- psi</div></div>
+        <div class="edr-cell"><div class="edr-name">Hook Load</div><div class="edr-val" id="edr-hook">-- klbs</div></div>
+    </div>
+
     <div class="grid">
         <div class="panel">
             <h3>SOP Firewall Settings</h3>
@@ -76,22 +106,66 @@
             <button class="primary" onclick="saveSOP()">Deploy SOPs to Edge Model</button>
         </div>
         <div class="panel">
-            <h3>Live Qwen 1.5B Telemetry Stream</h3>
+            <div class="panel-header">
+                <h3>Live Qwen 1.5B Telemetry Stream</h3>
+                <div class="filter-group">
+                    <button class="btn-filter active" id="filter-all" onclick="setFilter('all')">All Decisions</button>
+                    <button class="btn-filter" id="filter-ilt" onclick="setFilter('ilt')">ILT Only</button>
+                </div>
+            </div>
             <div id="live-feed">Waiting for WITSML telemetry...</div>
         </div>
     </div>
 
     <script>
+        let currentFilter = 'all';
+
         document.getElementById('grafana-link').href =
             `${window.location.protocol}//${window.location.hostname}:3001/d/witsml-edge-overview/witsml-edge-ai-and-rig-telemetry-overview`;
 
-        // Load existing SOPs on page load
         fetch('/api/sops').then(res => res.json()).then(data => {
             document.getElementById('wob').value = data.min_wob;
             document.getElementById('rpm').value = data.min_rpm;
             document.getElementById('flow').value = data.min_flow;
             document.getElementById('conn').value = data.max_conn_time;
         });
+
+        function refreshReadiness() {
+            fetch('/ready')
+                .then(res => res.json())
+                .then(r => {
+                    const dbEl = document.getElementById('badge-db');
+                    dbEl.textContent = r.timescaledb?.ok
+                        ? `TimescaleDB: Online (${r.timescaledb.latency_ms}ms)`
+                        : 'TimescaleDB: Offline';
+                    dbEl.className = `badge ${r.timescaledb?.ok ? 'online' : 'offline'}`;
+
+                    const olEl = document.getElementById('badge-ollama');
+                    olEl.textContent = r.ollama?.ok
+                        ? `Ollama (${r.ollama.model}): Online`
+                        : `Ollama (${r.ollama?.model || 'qwen2.5:1.5b'}): Failover Active`;
+                    olEl.className = `badge ${r.ollama?.ok ? 'online' : 'offline'}`;
+                })
+                .catch(() => {});
+        }
+
+        function refreshLatestBatch() {
+            fetch('/api/batches?limit=1')
+                .then(res => res.json())
+                .then(({ batches }) => {
+                    const latest = batches?.[0]?.payload;
+                    const pt = latest?.telemetry?.[latest.telemetry.length - 1];
+                    if (!pt) return;
+                    document.getElementById('edr-op').textContent = (latest.metadata?.active_operation || '--').toUpperCase();
+                    document.getElementById('edr-depth').textContent = `${pt.hole_depth_ft} ft`;
+                    document.getElementById('edr-wob').textContent = `${pt.wob_klbs} klbs`;
+                    document.getElementById('edr-rpm').textContent = `${pt.rpm}`;
+                    document.getElementById('edr-flow').textContent = `${pt.flow_in_gpm} gpm`;
+                    document.getElementById('edr-spp').textContent = `${pt.spp_psi} psi`;
+                    document.getElementById('edr-hook').textContent = `${pt.hook_load_klbs} klbs`;
+                })
+                .catch(() => {});
+        }
 
         function refreshStats() {
             fetch('/api/stats')
@@ -104,9 +178,9 @@
                     document.getElementById('kpi-queue').textContent = stats.queue?.total_pending ?? 0;
                 })
                 .catch(() => {});
+            refreshLatestBatch();
         }
 
-        // Save new SOPs and update backend
         function saveSOP() {
             fetch('/api/sops', {
                 method: 'POST',
@@ -122,14 +196,20 @@
 
         function simulateWindow(mode) {
             const start = Date.now();
-            const isDrilling = mode === 'drilling';
-            const points = isDrilling
-                ? [{ depth: 10045, wob: 18, rpm: 122, flow: 405, spp: 2850, block_pos: 65 }]
-                : [
+            let activeOp = 'drilling';
+            let points = [{ depth: 10045, wob: 18, rpm: 122, flow: 405, spp: 2850, block_pos: 65 }];
+
+            if (mode === 'dysfunction') {
+                activeOp = 'drilling';
+                points = [{ depth: 10050, wob: 2, rpm: 12, flow: 85, spp: 1900, block_pos: 62 }];
+            } else if (mode === 'connection') {
+                activeOp = 'connection';
+                points = [
                     { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 },
                     { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 },
                     { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 }
                 ];
+            }
 
             const payload = {
                 metadata: {
@@ -138,7 +218,7 @@
                     window_start: new Date(start).toISOString(),
                     window_end: new Date(start + 5 * 60000).toISOString(),
                     interval_seconds: 10,
-                    active_operation: isDrilling ? 'drilling' : 'connection'
+                    active_operation: activeOp
                 },
                 telemetry: points.map((pt, i) => ({
                     timestamp: new Date(start + i * 10000).toISOString(),
@@ -161,6 +241,7 @@
         }
 
         function appendDecision(data, clearPlaceholder = false) {
+            if (currentFilter === 'ilt' && !data.is_ilt) return;
             const feed = document.getElementById('live-feed');
             if (clearPlaceholder || feed.textContent === 'Waiting for WITSML telemetry...') {
                 feed.innerHTML = '';
@@ -174,22 +255,35 @@
             feed.scrollTop = feed.scrollHeight;
         }
 
-        // Hydrate recent decisions and stats from TimescaleDB on page load
-        refreshStats();
-        setInterval(refreshStats, 5000);
-
-        fetch('/api/decisions?limit=20')
-            .then(res => res.json())
-            .then(({ decisions }) => {
-                if (Array.isArray(decisions) && decisions.length > 0) {
+        function loadDecisions() {
+            const query = currentFilter === 'ilt' ? '/api/decisions?limit=25&is_ilt=true' : '/api/decisions?limit=25';
+            fetch(query)
+                .then(res => res.json())
+                .then(({ decisions }) => {
                     const feed = document.getElementById('live-feed');
                     feed.innerHTML = '';
-                    decisions.slice().reverse().forEach(d => appendDecision(d));
-                }
-            })
-            .catch(() => {});
+                    if (Array.isArray(decisions) && decisions.length > 0) {
+                        decisions.slice().reverse().forEach(d => appendDecision(d));
+                    } else {
+                        feed.textContent = 'Waiting for WITSML telemetry...';
+                    }
+                })
+                .catch(() => {});
+        }
 
-        // Connect to Server-Sent Events (SSE) for the live log stream
+        function setFilter(mode) {
+            currentFilter = mode;
+            document.getElementById('filter-all').className = `btn-filter ${mode === 'all' ? 'active' : ''}`;
+            document.getElementById('filter-ilt').className = `btn-filter ${mode === 'ilt' ? 'active' : ''}`;
+            loadDecisions();
+        }
+
+        refreshReadiness();
+        refreshStats();
+        loadDecisions();
+        setInterval(refreshStats, 5000);
+        setInterval(refreshReadiness, 15000);
+
         const source = new EventSource('/api/stream');
         source.onmessage = function(event) {
             const data = JSON.parse(event.data);

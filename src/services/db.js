@@ -68,21 +68,79 @@ async function saveAiDecision(decision, metadata = {}) {
   }
 }
 
-async function getRecentAiDecisions(limit = 25) {
+async function getRecentAiDecisions(options = 25) {
   try {
     await ensureDecisionColumns();
-    const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 200);
+    const opts = typeof options === 'object' && options !== null ? options : { limit: options };
+    const safeLimit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
+
+    const conditions = [];
+    const values = [];
+
+    if (opts.rig_id) {
+      values.push(String(opts.rig_id));
+      conditions.push(`rig_id = $${values.length}`);
+    }
+    if (opts.well_id) {
+      values.push(String(opts.well_id));
+      conditions.push(`well_id = $${values.length}`);
+    }
+    if (opts.is_ilt !== undefined && opts.is_ilt !== '') {
+      const boolVal = opts.is_ilt === true || opts.is_ilt === 'true';
+      values.push(boolVal);
+      conditions.push(`is_ilt = $${values.length}`);
+    }
+
+    values.push(safeLimit);
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const { rows } = await pool.query(
       `SELECT id, timestamp, rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification
        FROM ai_decisions
+       ${whereClause}
        ORDER BY timestamp DESC
-       LIMIT $1`,
-      [safeLimit]
+       LIMIT $${values.length}`,
+      values
     );
     return rows;
   } catch (err) {
     console.error("[TimescaleDB Error] Fetching recent AI decisions:", err.message);
     return [];
+  }
+}
+
+async function getRecentTelemetryBatches(options = {}) {
+  try {
+    const safeLimit = Math.min(Math.max(Number(options.limit) || 10, 1), 100);
+    const values = [];
+    let whereClause = '';
+    if (options.rig_id) {
+      values.push(String(options.rig_id));
+      whereClause = `WHERE rig_id = $1`;
+    }
+    values.push(safeLimit);
+    const { rows } = await pool.query(
+      `SELECT id, timestamp, rig_id, well_id, payload
+       FROM telemetry_batches
+       ${whereClause}
+       ORDER BY timestamp DESC
+       LIMIT $${values.length}`,
+      values
+    );
+    return rows;
+  } catch (err) {
+    console.error("[TimescaleDB Error] Fetching recent telemetry batches:", err.message);
+    return [];
+  }
+}
+
+async function checkDbHealth() {
+  const start = Date.now();
+  try {
+    await pool.query('SELECT 1');
+    return { ok: true, latency_ms: Date.now() - start };
+  } catch (err) {
+    return { ok: false, latency_ms: Date.now() - start, error: err.message };
   }
 }
 
@@ -127,5 +185,7 @@ module.exports = {
   saveTelemetryBatch,
   saveAiDecision,
   getRecentAiDecisions,
+  getRecentTelemetryBatches,
+  checkDbHealth,
   getTelemetryStats
 };
