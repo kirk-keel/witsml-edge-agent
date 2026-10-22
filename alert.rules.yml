@@ -1,0 +1,39 @@
+groups:
+  - name: witsml_edge_alerts
+    interval: 15s
+    rules:
+      - alert: RepeatedIltDetected
+        expr: increase(witsml_ilt_detections_total[10m]) >= 2
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Repeated Invisible Lost Time (ILT) detected on {{ $labels.rig_id }}"
+          description: "At least 2 ILT events were flagged in the last 10 minutes on rig {{ $labels.rig_id }} (well {{ $labels.well_id }})."
+
+      - alert: AiInferenceQueueBacklog
+        expr: witsml_ai_queue_depth >= 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Edge AI inference queue backlog ({{ $value }} batches pending)"
+          description: "The local Ollama inference queue has held 5 or more pending WITSML batches for over 2 minutes."
+
+      - alert: SlowEdgeAiInference
+        expr: (rate(witsml_ai_inference_duration_seconds_sum[5m]) / rate(witsml_ai_inference_duration_seconds_count[5m])) > 25
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High local LLM inference latency (> 25s)"
+          description: "Average Ollama ({{ $labels.model }}) inference duration has exceeded 25 seconds over the last 5 minutes."
+
+      - alert: WitsmlEdgeAgentDown
+        expr: up{job="witsml-agent"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "WITSML Edge Agent target is unreachable"
+          description: "Prometheus has failed to scrape witsml-agent:3000/metrics for more than 1 minute."

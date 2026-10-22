@@ -57,7 +57,7 @@ function updateSopConfig(nextConfig) {
 
 /**
  * Deterministically evaluates sensor window averages and durations against active SOP rules
- * so small edge models (qwen2.5:1.5b) cannot hallucinate ILT false positives.
+ * so small edge models (qwen2.5:1.5b) cannot hallucinate ILT false positives or inverted inequalities.
  */
 function evaluateSopDeterministic(data, sopConfig) {
     const points = data.telemetry || [];
@@ -78,6 +78,14 @@ function evaluateSopDeterministic(data, sopConfig) {
         const rpmOk = avgRpm >= sopConfig.min_rpm;
         const flowOk = avgFlow >= sopConfig.min_flow;
         const isIlt = !(wobOk && rpmOk && flowOk);
+        const wobCmp = wobOk ? '>' : '<';
+        const rpmCmp = rpmOk ? '>' : '<';
+        const flowCmp = flowOk ? '>' : '<';
+        const factualJustification =
+            `Actual WOB ${avgWob} is ${wobCmp} min ${sopConfig.min_wob} required, ` +
+            `RPM ${avgRpm} is ${rpmCmp} min ${sopConfig.min_rpm} required, ` +
+            `Flow ${avgFlow} is ${flowCmp} min ${sopConfig.min_flow} required.`;
+
         return {
             declared_op: declaredOp,
             actual_state: isIlt ? 'drilling_dysfunction' : 'drilling',
@@ -86,7 +94,8 @@ function evaluateSopDeterministic(data, sopConfig) {
             avg_wob: avgWob,
             avg_rpm: avgRpm,
             avg_flow: avgFlow,
-            summary: `Avg WOB=${avgWob} (min ${sopConfig.min_wob}), Avg RPM=${avgRpm} (min ${sopConfig.min_rpm}), Avg Flow=${avgFlow} (min ${sopConfig.min_flow})`
+            summary: factualJustification,
+            factual_justification: factualJustification
         };
     }
 
@@ -96,6 +105,11 @@ function evaluateSopDeterministic(data, sopConfig) {
         const iltSec = overMaxConn
             ? (windowSpanSec > sopConfig.max_conn_time ? windowSpanSec - sopConfig.max_conn_time : sopConfig.max_conn_time)
             : 0;
+        const connCmp = overMaxConn ? '>' : '<=';
+        const factualJustification =
+            `Connection duration ${windowSpanSec}s is ${connCmp} max ${sopConfig.max_conn_time}s allowed ` +
+            `(Actual WOB ${avgWob}, RPM ${avgRpm}, Flow ${avgFlow}).`;
+
         return {
             declared_op: declaredOp,
             actual_state: 'connection',
@@ -104,10 +118,12 @@ function evaluateSopDeterministic(data, sopConfig) {
             avg_wob: avgWob,
             avg_rpm: avgRpm,
             avg_flow: avgFlow,
-            summary: `Connection window=${windowSpanSec}s (max ${sopConfig.max_conn_time}s), Avg WOB=${avgWob}, Avg RPM=${avgRpm}, Avg Flow=${avgFlow}`
+            summary: factualJustification,
+            factual_justification: factualJustification
         };
     }
 
+    const factualJustification = `Operation ${declaredOp}: Actual WOB ${avgWob}, RPM ${avgRpm}, Flow ${avgFlow}.`;
     return {
         declared_op: declaredOp,
         actual_state: declaredOp,
@@ -116,8 +132,34 @@ function evaluateSopDeterministic(data, sopConfig) {
         avg_wob: avgWob,
         avg_rpm: avgRpm,
         avg_flow: avgFlow,
-        summary: `Operation=${declaredOp}, Avg WOB=${avgWob}, Avg RPM=${avgRpm}, Avg Flow=${avgFlow}`
+        summary: factualJustification,
+        factual_justification: factualJustification
     };
+}
+
+/**
+ * Ensures the LLM justification does not invert '<' and '>' inequalities against the factual check.
+ */
+function sanitizeJustification(rawJustification, preCheck) {
+    const text = String(rawJustification || '').trim();
+    if (!text) return preCheck.factual_justification;
+
+    if (preCheck.declared_op === 'drilling' && !preCheck.is_ilt) {
+        if (text.includes('<') || /less than|below/i.test(text)) {
+            return preCheck.factual_justification;
+        }
+    }
+    if (preCheck.declared_op === 'drilling' && preCheck.is_ilt) {
+        if (!text.includes('<') && !/less than|below/i.test(text)) {
+            return preCheck.factual_justification;
+        }
+    }
+    if (preCheck.declared_op === 'connection' && preCheck.is_ilt) {
+        if (text.includes('>') && !text.includes('max') && !text.includes('<')) {
+            return preCheck.factual_justification;
+        }
+    }
+    return text;
 }
 
 const outputParser = StructuredOutputParser.fromZodSchema(
@@ -175,7 +217,7 @@ Telemetry: {telemetry_data}
 
 ### Output:
 {format_instructions}
-Output raw JSON. Your 'justification' field must strictly state the factual math (e.g., 'Actual WOB 18 > min 5, RPM 125 > min 20, Flow 405 > min 100'). Do not contradict the pre-computed check.`,
+Output raw JSON. Your 'justification' field MUST copy the exact inequalities from the Pre-Computed Engineering Check without flipping '>' or '<'.`,
             inputVariables: [
                 "declared_op",
                 "telemetry_data",
@@ -205,7 +247,7 @@ Output raw JSON. Your 'justification' field must strictly state the factual math
 
         endTimer({ status: 'success' });
 
-        // Guard against 1.5B model boolean/duration hallucinations using deterministic SOP evaluation
+        // Guard against 1.5B model boolean/duration/symbol hallucinations using deterministic SOP evaluation
         const rawConfidence = Number(rawResult.confidence_score);
         const normalizedConfidence = Number.isFinite(rawConfidence)
             ? (rawConfidence > 1 ? Number((rawConfidence / 100).toFixed(2)) : Number(rawConfidence.toFixed(2)))
@@ -216,6 +258,7 @@ Output raw JSON. Your 'justification' field must strictly state the factual math
         const actual_state = preCheck.actual_state || rawResult.actual_state || 'unknown';
         const is_ilt = preCheck.is_ilt;
         const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
+        const justification = sanitizeJustification(rawResult.justification, preCheck);
 
         aiDecisionsCounter.inc({
             rig_id,
@@ -236,7 +279,7 @@ Output raw JSON. Your 'justification' field must strictly state the factual math
             is_ilt,
             ilt_duration_seconds,
             confidence_score: normalizedConfidence,
-            justification: rawResult.justification,
+            justification,
             rig_id,
             well_id,
             declared_op: data.metadata.active_operation,
@@ -284,6 +327,7 @@ function analyzeRigStateAsync(data) {
 module.exports = {
     analyzeRigStateAsync,
     evaluateSopDeterministic,
+    sanitizeJustification,
     getQueueStatus,
     telemetryEvents,
     getSopConfig,

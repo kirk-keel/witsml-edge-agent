@@ -3,7 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const app = require('../src/index');
-const { DEFAULT_SOP_CONFIG, updateSopConfig, evaluateSopDeterministic } = require('../src/services/ai');
+const {
+    DEFAULT_SOP_CONFIG,
+    updateSopConfig,
+    evaluateSopDeterministic,
+    sanitizeJustification
+} = require('../src/services/ai');
 
 const sopFilePath = path.join(__dirname, '../src/sop-config.json');
 
@@ -67,6 +72,13 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(normalDrilling.is_ilt, false);
         assert.equal(normalDrilling.ilt_duration_seconds, 0);
         assert.equal(normalDrilling.actual_state, 'drilling');
+        assert.equal(
+            sanitizeJustification(
+                'Actual WOB 18 is < min 5 required, RPM 125 is < min 20 required, Flow 405 is < min 100 required.',
+                normalDrilling
+            ),
+            'Actual WOB 18 is > min 5 required, RPM 125 is > min 20 required, Flow 405 is > min 100 required.'
+        );
 
         const connectionIlt = evaluateSopDeterministic(
             {

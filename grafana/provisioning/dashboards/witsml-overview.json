@@ -220,6 +220,74 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 8,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "title": "Hydraulics & Depth: SPP (psi), Hook Load (klbs), Hole Depth (ft)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT (pt->>'timestamp')::timestamptz AS time, (pt->>'spp_psi')::numeric AS \"SPP (psi)\", (pt->>'hook_load_klbs')::numeric AS \"Hook Load (klbs)\", (pt->>'hole_depth_ft')::numeric AS \"Hole Depth (ft)\" FROM telemetry_batches tb, jsonb_array_elements(tb.payload->'telemetry') AS pt WHERE $__timeFilter((pt->>'timestamp')::timestamptz) ORDER BY 1;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 9,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "title": "Edge AI Inference Queue Depth & Decisions by State",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "witsml_ai_queue_depth",
+          "legendFormat": "Pending Queue Depth",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(witsml_ai_decisions_total) by (actual_state, is_ilt)",
+          "legendFormat": "Decisions ({{actual_state}}, ILT={{is_ilt}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
             "align": "auto",
             "cellOptions": { "type": "auto" },
             "inspect": false
@@ -232,7 +300,7 @@
           }
         ]
       },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 12 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 20 },
       "id": 7,
       "options": {
         "showHeader": true,
@@ -261,5 +329,5 @@
   "timezone": "browser",
   "title": "WITSML Edge AI & Rig Telemetry Overview",
   "uid": "witsml-edge-overview",
-  "version": 1
+  "version": 2
 }
