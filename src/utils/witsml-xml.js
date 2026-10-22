@@ -45,6 +45,9 @@ const MNEMONIC_MAP = Object.freeze({
     ECDA: 'ecd_ppg',
     ECD: 'ecd_ppg',
     ECD_PPG: 'ecd_ppg',
+    TQA: 'torque_klbft',
+    TORQUE: 'torque_klbft',
+    TORQUE_KLBFT: 'torque_klbft',
     RPM: 'rpm',
     SRPM: 'rpm'
 });

@@ -5,6 +5,7 @@ const { analyzeRigStateAsync } = require('../services/ai');
 const { telemetryIngestionCounter, telemetryPointsCounter } = require('../utils/metrics');
 const { parseWitsmlXmlToTelemetry } = require('../utils/witsml-xml');
 const { requireEdgeApiKey } = require('../utils/auth');
+const { edgeRateLimiter } = require('../utils/rate-limit');
 
 const router = express.Router();
 
@@ -30,7 +31,8 @@ const telemetrySchema = z.object({
         flow_out_gpm: z.number().optional(),
         pit_gain_bbl: z.number().optional(),
         gas_units: z.number().optional(),
-        ecd_ppg: z.number().optional()
+        ecd_ppg: z.number().optional(),
+        torque_klbft: z.number().optional()
     })).min(1)
 });
 
@@ -100,10 +102,11 @@ async function handleWitsmlXmlIngestion(req, res) {
     }
 }
 
-router.post('/api/v1/telemetry', requireEdgeApiKey, handleTelemetryIngestion);
-router.post('/api/witsml', requireEdgeApiKey, handleTelemetryIngestion);
+router.post('/api/v1/telemetry', edgeRateLimiter, requireEdgeApiKey, handleTelemetryIngestion);
+router.post('/api/witsml', edgeRateLimiter, requireEdgeApiKey, handleTelemetryIngestion);
 router.post(
     '/api/v1/witsml/xml',
+    edgeRateLimiter,
     requireEdgeApiKey,
     express.text({ type: ['application/xml', 'text/xml', 'text/plain'], limit: '2mb' }),
     handleWitsmlXmlIngestion

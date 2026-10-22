@@ -22,7 +22,11 @@ async function ensureDecisionColumns() {
         ADD COLUMN IF NOT EXISTS rop_fphr NUMERIC DEFAULT 0,
         ADD COLUMN IF NOT EXISTS mse_psi NUMERIC DEFAULT 0,
         ADD COLUMN IF NOT EXISTS hydraulic_status VARCHAR(50) DEFAULT 'normal',
-        ADD COLUMN IF NOT EXISTS ilt_cost_usd NUMERIC DEFAULT 0;
+        ADD COLUMN IF NOT EXISTS ilt_cost_usd NUMERIC DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS bit_wear_pct NUMERIC DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS stick_slip_index NUMERIC DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS vibration_status VARCHAR(50) DEFAULT 'smooth',
+        ADD COLUMN IF NOT EXISTS tripping_speed_fpm NUMERIC DEFAULT 0;
       CREATE TABLE IF NOT EXISTS rig_sops (
         rig_id VARCHAR(50) PRIMARY KEY,
         min_wob NUMERIC NOT NULL DEFAULT 5,
@@ -61,8 +65,8 @@ async function insertDecisionDirect({ decision, metadata = {} }) {
 
   await pool.query(
     `INSERT INTO ai_decisions
-      (rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification, rop_fphr, mse_psi, hydraulic_status, ilt_cost_usd)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      (rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification, rop_fphr, mse_psi, hydraulic_status, ilt_cost_usd, bit_wear_pct, stick_slip_index, vibration_status, tripping_speed_fpm)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [
       rigId,
       wellId,
@@ -75,7 +79,11 @@ async function insertDecisionDirect({ decision, metadata = {} }) {
       Number(decision.rop_fphr) || 0,
       Number(decision.mse_psi) || 0,
       decision.hydraulic_status || 'normal',
-      Number(decision.ilt_cost_usd) || 0
+      Number(decision.ilt_cost_usd) || 0,
+      Number(decision.bit_wear_pct) || 0,
+      Number(decision.stick_slip_index) || 0,
+      decision.vibration_status || 'smooth',
+      Number(decision.tripping_speed_fpm) || 0
     ]
   );
 }
@@ -176,7 +184,11 @@ async function getRecentAiDecisions(options = 25) {
               COALESCE(rop_fphr, 0)::float AS rop_fphr,
               COALESCE(mse_psi, 0)::float AS mse_psi,
               COALESCE(hydraulic_status, 'normal') AS hydraulic_status,
-              COALESCE(ilt_cost_usd, 0)::float AS ilt_cost_usd
+              COALESCE(ilt_cost_usd, 0)::float AS ilt_cost_usd,
+              COALESCE(bit_wear_pct, 0)::float AS bit_wear_pct,
+              COALESCE(stick_slip_index, 0)::float AS stick_slip_index,
+              COALESCE(vibration_status, 'smooth') AS vibration_status,
+              COALESCE(tripping_speed_fpm, 0)::float AS tripping_speed_fpm
        FROM ai_decisions
        ${whereClause}
        ORDER BY timestamp DESC

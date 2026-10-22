@@ -21,7 +21,11 @@ CREATE TABLE IF NOT EXISTS ai_decisions (
     rop_fphr NUMERIC DEFAULT 0,
     mse_psi NUMERIC DEFAULT 0,
     hydraulic_status VARCHAR(50) DEFAULT 'normal',
-    ilt_cost_usd NUMERIC DEFAULT 0
+    ilt_cost_usd NUMERIC DEFAULT 0,
+    bit_wear_pct NUMERIC DEFAULT 0,
+    stick_slip_index NUMERIC DEFAULT 0,
+    vibration_status VARCHAR(50) DEFAULT 'smooth',
+    tripping_speed_fpm NUMERIC DEFAULT 0
 );
 SELECT create_hypertable('ai_decisions', 'timestamp', if_not_exists => TRUE);
 
@@ -32,7 +36,11 @@ ALTER TABLE ai_decisions
     ADD COLUMN IF NOT EXISTS rop_fphr NUMERIC DEFAULT 0,
     ADD COLUMN IF NOT EXISTS mse_psi NUMERIC DEFAULT 0,
     ADD COLUMN IF NOT EXISTS hydraulic_status VARCHAR(50) DEFAULT 'normal',
-    ADD COLUMN IF NOT EXISTS ilt_cost_usd NUMERIC DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS ilt_cost_usd NUMERIC DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS bit_wear_pct NUMERIC DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS stick_slip_index NUMERIC DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS vibration_status VARCHAR(50) DEFAULT 'smooth',
+    ADD COLUMN IF NOT EXISTS tripping_speed_fpm NUMERIC DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS rig_sops (
     rig_id VARCHAR(50) PRIMARY KEY,

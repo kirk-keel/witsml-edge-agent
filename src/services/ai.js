@@ -10,6 +10,7 @@ const { logAiDecision } = require('../utils/logger');
 const { dispatchIltAlert } = require('../utils/alerter');
 const { computeDrillingMechanics } = require('../utils/mechanics');
 const { evaluateWellControl } = require('../utils/wellcontrol');
+const { evaluateBitAndVibration } = require('../utils/bit-wear');
 const {
     aiInferenceLatencyHistogram,
     iltDetectionCounter,
@@ -19,7 +20,10 @@ const {
     aiQueueDepthGauge,
     drillingRopGauge,
     drillingMseGauge,
-    wellControlEventsCounter
+    wellControlEventsCounter,
+    bitWearGauge,
+    stickSlipIndexGauge,
+    trippingSpeedGauge
 } = require('../utils/metrics');
 
 const telemetryEvents = new EventEmitter();
@@ -357,19 +361,23 @@ async function processSingleBatch(data) {
         const justification = sanitizeJustification(rawResult.justification, preCheck);
         const mechanics = computeDrillingMechanics(data, sopConfig, ilt_duration_seconds);
         const wellControl = evaluateWellControl(data);
+        const bitAndVibration = evaluateBitAndVibration(data, mechanics, sopConfig);
         const hydraulic_status = wellControl.well_control_status !== 'normal'
             ? wellControl.well_control_status
-            : mechanics.hydraulic_status;
+            : (bitAndVibration.swab_surge_status !== 'normal' ? bitAndVibration.swab_surge_status : mechanics.hydraulic_status);
 
         drillingRopGauge.set({ rig_id, well_id }, mechanics.rop_fphr);
         drillingMseGauge.set({ rig_id, well_id }, mechanics.mse_psi);
+        bitWearGauge.set({ rig_id, well_id, bit_grade: bitAndVibration.bit_grade }, bitAndVibration.bit_wear_pct);
+        stickSlipIndexGauge.set({ rig_id, well_id }, bitAndVibration.stick_slip_index);
+        trippingSpeedGauge.set({ rig_id, well_id }, bitAndVibration.tripping_speed_fpm);
 
         if (hydraulic_status !== 'normal') {
             wellControlEventsCounter.inc({
                 rig_id,
                 well_id,
                 event_type: hydraulic_status,
-                severity: wellControl.severity
+                severity: wellControl.severity !== 'normal' ? wellControl.severity : 'warning'
             });
         }
 
@@ -401,6 +409,11 @@ async function processSingleBatch(data) {
             mse_ksi: mechanics.mse_ksi,
             hydraulic_status,
             well_control: wellControl,
+            bit_wear_pct: bitAndVibration.bit_wear_pct,
+            bit_grade: bitAndVibration.bit_grade,
+            stick_slip_index: bitAndVibration.stick_slip_index,
+            vibration_status: bitAndVibration.vibration_status,
+            tripping_speed_fpm: bitAndVibration.tripping_speed_fpm,
             ilt_cost_usd: mechanics.ilt_cost_usd,
             rig_id,
             well_id,
@@ -424,19 +437,23 @@ async function processSingleBatch(data) {
         const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
         const mechanics = computeDrillingMechanics(data, sopConfig, ilt_duration_seconds);
         const wellControl = evaluateWellControl(data);
+        const bitAndVibration = evaluateBitAndVibration(data, mechanics, sopConfig);
         const hydraulic_status = wellControl.well_control_status !== 'normal'
             ? wellControl.well_control_status
-            : mechanics.hydraulic_status;
+            : (bitAndVibration.swab_surge_status !== 'normal' ? bitAndVibration.swab_surge_status : mechanics.hydraulic_status);
 
         drillingRopGauge.set({ rig_id, well_id }, mechanics.rop_fphr);
         drillingMseGauge.set({ rig_id, well_id }, mechanics.mse_psi);
+        bitWearGauge.set({ rig_id, well_id, bit_grade: bitAndVibration.bit_grade }, bitAndVibration.bit_wear_pct);
+        stickSlipIndexGauge.set({ rig_id, well_id }, bitAndVibration.stick_slip_index);
+        trippingSpeedGauge.set({ rig_id, well_id }, bitAndVibration.tripping_speed_fpm);
 
         if (hydraulic_status !== 'normal') {
             wellControlEventsCounter.inc({
                 rig_id,
                 well_id,
                 event_type: hydraulic_status,
-                severity: wellControl.severity
+                severity: wellControl.severity !== 'normal' ? wellControl.severity : 'warning'
             });
         }
 
@@ -468,6 +485,11 @@ async function processSingleBatch(data) {
             mse_ksi: mechanics.mse_ksi,
             hydraulic_status,
             well_control: wellControl,
+            bit_wear_pct: bitAndVibration.bit_wear_pct,
+            bit_grade: bitAndVibration.bit_grade,
+            stick_slip_index: bitAndVibration.stick_slip_index,
+            vibration_status: bitAndVibration.vibration_status,
+            tripping_speed_fpm: bitAndVibration.tripping_speed_fpm,
             ilt_cost_usd: mechanics.ilt_cost_usd,
             rig_id,
             well_id,

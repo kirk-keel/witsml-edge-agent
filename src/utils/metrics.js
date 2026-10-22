@@ -97,6 +97,27 @@ const edgeSpoolPendingGauge = new client.Gauge({
     registers: [register]
 });
 
+const bitWearGauge = new client.Gauge({
+    name: 'witsml_bit_wear_pct',
+    help: 'Estimated bit cutter wear percentage (0-100%) based on MSE efficiency trend',
+    labelNames: ['rig_id', 'well_id', 'bit_grade'],
+    registers: [register]
+});
+
+const stickSlipIndexGauge = new client.Gauge({
+    name: 'witsml_stick_slip_index',
+    help: 'Latest torsional Stick-Slip Severity Index (SSI)',
+    labelNames: ['rig_id', 'well_id'],
+    registers: [register]
+});
+
+const trippingSpeedGauge = new client.Gauge({
+    name: 'witsml_tripping_speed_fpm',
+    help: 'Latest calculated pipe/block tripping velocity in ft/min',
+    labelNames: ['rig_id', 'well_id'],
+    registers: [register]
+});
+
 module.exports = {
     register,
     telemetryIngestionCounter,
@@ -111,5 +132,8 @@ module.exports = {
     drillingMseGauge,
     alertWebhooksCounter,
     wellControlEventsCounter,
-    edgeSpoolPendingGauge
+    edgeSpoolPendingGauge,
+    bitWearGauge,
+    stickSlipIndexGauge,
+    trippingSpeedGauge
 };

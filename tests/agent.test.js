@@ -12,7 +12,9 @@ const {
 } = require('../src/services/ai');
 const { computeDrillingMechanics } = require('../src/utils/mechanics');
 const { evaluateWellControl } = require('../src/utils/wellcontrol');
+const { evaluateBitAndVibration, resetBitWearBaselines } = require('../src/utils/bit-wear');
 const { enqueueSpoolRecord, flushSpool, clearSpool, getSpoolStatus } = require('../src/utils/spooler');
+const { resetRateLimiter } = require('../src/utils/rate-limit');
 
 const sopFilePath = path.join(__dirname, '../src/sop-config.json');
 
@@ -63,6 +65,43 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.match(text, /witsml_drilling_mse_psi/);
         assert.match(text, /witsml_well_control_events_total/);
         assert.match(text, /witsml_edge_spool_pending/);
+        assert.match(text, /witsml_bit_wear_pct/);
+        assert.match(text, /witsml_stick_slip_index/);
+        assert.match(text, /witsml_tripping_speed_fpm/);
+    });
+
+    it('evaluateBitAndVibration computes Stick-Slip Severity, Bit Wear/IADC Grade, and Tripping Swab/Surge', () => {
+        resetBitWearBaselines();
+        const start = Date.now();
+        const stickSlip = evaluateBitAndVibration(
+            {
+                metadata: { rig_id: 'Rig-412', active_operation: 'drilling' },
+                telemetry: [
+                    { timestamp: new Date(start).toISOString(), rpm: 20, torque_klbft: 6, bit_depth_ft: 10000, block_pos_ft: 80 },
+                    { timestamp: new Date(start + 60000).toISOString(), rpm: 180, torque_klbft: 24, bit_depth_ft: 10002, block_pos_ft: 78 }
+                ]
+            },
+            { mse_psi: 52000 },
+            { max_trip_speed_fpm: 90 }
+        );
+        assert.equal(stickSlip.stick_slip_index, 0.8);
+        assert.equal(stickSlip.vibration_status, 'severe_stick_slip');
+        assert.ok(stickSlip.bit_wear_pct > 75);
+        assert.equal(stickSlip.bit_recommendation, 'pull_bit_recommended');
+
+        const fastTrip = evaluateBitAndVibration(
+            {
+                metadata: { rig_id: 'Rig-412', active_operation: 'tripping_out' },
+                telemetry: [
+                    { timestamp: new Date(start).toISOString(), rpm: 0, bit_depth_ft: 9500, block_pos_ft: 10 },
+                    { timestamp: new Date(start + 60000).toISOString(), rpm: 0, bit_depth_ft: 9380, block_pos_ft: 90 }
+                ]
+            },
+            { mse_psi: 0 },
+            { max_trip_speed_fpm: 90 }
+        );
+        assert.equal(fastTrip.tripping_speed_fpm, 120);
+        assert.equal(fastTrip.swab_surge_status, 'swab_risk');
     });
 
     it('evaluateWellControl detects kick_warning, lost_circulation, and normal returns', async () => {
@@ -436,9 +475,26 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         const fleetBody = await fleetRes.json();
         assert.ok(Array.isArray(fleetBody.rigs));
         assert.equal(typeof readyBody.spool?.pending_count, 'number');
+
+        const openApiRes = await fetch(`${baseUrl}/openapi.json`);
+        assert.equal(openApiRes.status, 200);
+        const openApiBody = await openApiRes.json();
+        assert.equal(openApiBody.openapi, '3.1.0');
+        assert.ok(openApiBody.paths['/api/v1/telemetry']);
+
+        const docsRes = await fetch(`${baseUrl}/api/docs`);
+        assert.equal(docsRes.status, 200);
+        assert.match(docsRes.headers.get('content-type'), /text\/html/);
+
+        const syncStatusRes = await fetch(`${baseUrl}/api/cloud-sync/status`);
+        assert.equal(syncStatusRes.status, 200);
+        const syncTriggerRes = await fetch(`${baseUrl}/api/cloud-sync/trigger`, { method: 'POST' });
+        assert.equal(syncTriggerRes.status, 200);
+        const syncTriggerBody = await syncTriggerRes.json();
+        assert.equal(typeof syncTriggerBody.records_synced, 'number');
     });
 
-    it('requireEdgeApiKey enforces X-Edge-Key when EDGE_API_KEY is configured', async () => {
+    it('requireEdgeApiKey enforces X-Edge-Key and edgeRateLimiter enforces EDGE_RATE_LIMIT_PER_MIN', async () => {
         process.env.EDGE_API_KEY = 'secret-edge-token';
         try {
             const unauthRes = await fetch(`${baseUrl}/api/sops`, {
@@ -459,6 +515,27 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
             assert.equal(authRes.status, 200);
         } finally {
             delete process.env.EDGE_API_KEY;
+        }
+
+        resetRateLimiter();
+        process.env.EDGE_RATE_LIMIT_PER_MIN = '1';
+        try {
+            const first = await fetch(`${baseUrl}/api/v1/telemetry`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ metadata: {}, telemetry: [] })
+            });
+            assert.equal(first.status, 400);
+
+            const second = await fetch(`${baseUrl}/api/v1/telemetry`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ metadata: {}, telemetry: [] })
+            });
+            assert.equal(second.status, 429);
+        } finally {
+            delete process.env.EDGE_RATE_LIMIT_PER_MIN;
+            resetRateLimiter();
         }
     });
 });

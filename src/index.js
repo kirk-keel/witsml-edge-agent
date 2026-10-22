@@ -21,6 +21,8 @@ const {
 } = require('./services/db');
 const { getRecentAlerts } = require('./utils/alerter');
 const { getSpoolStatus } = require('./utils/spooler');
+const { triggerCloudSync, getCloudSyncStatus } = require('./utils/cloud-sync');
+const { getOpenApiSpec, renderApiDocsHtml } = require('./utils/openapi');
 const { requireEdgeApiKey } = require('./utils/auth');
 const { router: telemetryRouter } = require('./routes/telemetry');
 const { register } = require('./utils/metrics');
@@ -44,8 +46,18 @@ app.get('/ready', async (req, res) => {
         timescaledb,
         ollama,
         queue: getQueueStatus(),
-        spool: getSpoolStatus()
+        spool: getSpoolStatus(),
+        cloud_sync: getCloudSyncStatus()
     });
+});
+
+app.get('/openapi.json', (req, res) => {
+    res.json(getOpenApiSpec());
+});
+
+app.get('/api/docs', (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderApiDocsHtml());
 });
 
 // --- PROMETHEUS METRICS ---
@@ -165,6 +177,15 @@ app.get('/api/stats/hourly', async (req, res) => {
 app.get('/api/fleet/leaderboard', async (req, res) => {
     const rigs = await getFleetLeaderboard();
     res.json({ rigs });
+});
+
+app.get('/api/cloud-sync/status', (req, res) => {
+    res.json(getCloudSyncStatus());
+});
+
+app.post('/api/cloud-sync/trigger', requireEdgeApiKey, async (req, res) => {
+    const result = await triggerCloudSync(getRecentAiDecisions);
+    res.json(result);
 });
 
 // --- SERVER-SENT EVENTS (SSE) STREAM via EventEmitter ---
