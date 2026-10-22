@@ -11,7 +11,8 @@ const {
     aiInferenceLatencyHistogram,
     iltDetectionCounter,
     iltDurationSecondsCounter,
-    aiDecisionsCounter
+    aiDecisionsCounter,
+    aiQueueDepthGauge
 } = require('../utils/metrics');
 
 const telemetryEvents = new EventEmitter();
@@ -54,6 +55,71 @@ function updateSopConfig(nextConfig) {
     return { ...inMemorySopConfig };
 }
 
+/**
+ * Deterministically evaluates sensor window averages and durations against active SOP rules
+ * so small edge models (qwen2.5:1.5b) cannot hallucinate ILT false positives.
+ */
+function evaluateSopDeterministic(data, sopConfig) {
+    const points = data.telemetry || [];
+    const count = Math.max(points.length, 1);
+    const avgWob = Number((points.reduce((s, p) => s + Number(p.wob_klbs || 0), 0) / count).toFixed(2));
+    const avgRpm = Number((points.reduce((s, p) => s + Number(p.rpm || 0), 0) / count).toFixed(2));
+    const avgFlow = Number((points.reduce((s, p) => s + Number(p.flow_in_gpm || 0), 0) / count).toFixed(2));
+
+    const declaredOp = String(data.metadata?.active_operation || 'unknown').toLowerCase();
+    const startMs = Date.parse(data.metadata?.window_start);
+    const endMs = Date.parse(data.metadata?.window_end);
+    const windowSpanSec = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+        ? Math.round((endMs - startMs) / 1000)
+        : count * (Number(data.metadata?.interval_seconds) || 10);
+
+    if (declaredOp === 'drilling') {
+        const wobOk = avgWob >= sopConfig.min_wob;
+        const rpmOk = avgRpm >= sopConfig.min_rpm;
+        const flowOk = avgFlow >= sopConfig.min_flow;
+        const isIlt = !(wobOk && rpmOk && flowOk);
+        return {
+            declared_op: declaredOp,
+            actual_state: isIlt ? 'drilling_dysfunction' : 'drilling',
+            is_ilt: isIlt,
+            ilt_duration_seconds: isIlt ? Math.min(windowSpanSec, sopConfig.max_conn_time) : 0,
+            avg_wob: avgWob,
+            avg_rpm: avgRpm,
+            avg_flow: avgFlow,
+            summary: `Avg WOB=${avgWob} (min ${sopConfig.min_wob}), Avg RPM=${avgRpm} (min ${sopConfig.min_rpm}), Avg Flow=${avgFlow} (min ${sopConfig.min_flow})`
+        };
+    }
+
+    if (declaredOp === 'connection') {
+        const pumpsOff = avgWob === 0 && avgRpm === 0 && avgFlow === 0;
+        const overMaxConn = windowSpanSec > sopConfig.max_conn_time || (pumpsOff && points.length >= 3);
+        const iltSec = overMaxConn
+            ? (windowSpanSec > sopConfig.max_conn_time ? windowSpanSec - sopConfig.max_conn_time : sopConfig.max_conn_time)
+            : 0;
+        return {
+            declared_op: declaredOp,
+            actual_state: 'connection',
+            is_ilt: overMaxConn,
+            ilt_duration_seconds: iltSec,
+            avg_wob: avgWob,
+            avg_rpm: avgRpm,
+            avg_flow: avgFlow,
+            summary: `Connection window=${windowSpanSec}s (max ${sopConfig.max_conn_time}s), Avg WOB=${avgWob}, Avg RPM=${avgRpm}, Avg Flow=${avgFlow}`
+        };
+    }
+
+    return {
+        declared_op: declaredOp,
+        actual_state: declaredOp,
+        is_ilt: false,
+        ilt_duration_seconds: 0,
+        avg_wob: avgWob,
+        avg_rpm: avgRpm,
+        avg_flow: avgFlow,
+        summary: `Operation=${declaredOp}, Avg WOB=${avgWob}, Avg RPM=${avgRpm}, Avg Flow=${avgFlow}`
+    };
+}
+
 const outputParser = StructuredOutputParser.fromZodSchema(
     z.object({
         actual_state: z.string(),
@@ -64,11 +130,28 @@ const outputParser = StructuredOutputParser.fromZodSchema(
     })
 );
 
-async function analyzeRigStateAsync(data) {
+// Bounded FIFO Inference Queue (concurrency = 1) to protect edge CPU
+const inferenceQueue = [];
+let isProcessingQueue = false;
+
+function updateQueueMetric() {
+    aiQueueDepthGauge.set(inferenceQueue.length + (isProcessingQueue ? 1 : 0));
+}
+
+function getQueueStatus() {
+    return {
+        queued: inferenceQueue.length,
+        processing: isProcessingQueue,
+        total_pending: inferenceQueue.length + (isProcessingQueue ? 1 : 0)
+    };
+}
+
+async function processSingleBatch(data) {
     const modelName = process.env.OLLAMA_MODEL_NAME || "qwen2.5:1.5b";
     const endTimer = aiInferenceLatencyHistogram.startTimer({ model: modelName });
     try {
         const sopConfig = getSopConfig();
+        const preCheck = evaluateSopDeterministic(data, sopConfig);
 
         const model = new ChatOllama({
             baseUrl: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || "http://localhost:11434",
@@ -80,8 +163,11 @@ async function analyzeRigStateAsync(data) {
         const prompt = new PromptTemplate({
             template: `Analyze this WITSML telemetry against the Operating Rules.
 ### Rules:
-1. Drilling: WOB > {min_wob}, RPM > {min_rpm}, Flow > {min_flow}.
+1. Drilling: WOB > {min_wob}, RPM > {min_rpm}, Flow > {min_flow}. If ALL three are met, is_ilt MUST be false and ilt_duration_seconds MUST be 0.
 2. Connection: Max {max_conn_time}s.
+
+### Pre-Computed Engineering Check:
+{pre_check_summary} -> Expected is_ilt={expected_is_ilt}, Expected ilt_duration_seconds={expected_ilt_seconds}
 
 ### Payload:
 Declared: {declared_op}
@@ -89,44 +175,68 @@ Telemetry: {telemetry_data}
 
 ### Output:
 {format_instructions}
-Output raw JSON. Your 'justification' field must strictly state the factual math (e.g., 'Actual Flow 400 is > required 100'). Do not contradict the telemetry.`,
-            inputVariables: ["declared_op", "telemetry_data", "min_wob", "min_rpm", "min_flow", "max_conn_time"],
+Output raw JSON. Your 'justification' field must strictly state the factual math (e.g., 'Actual WOB 18 > min 5, RPM 125 > min 20, Flow 405 > min 100'). Do not contradict the pre-computed check.`,
+            inputVariables: [
+                "declared_op",
+                "telemetry_data",
+                "min_wob",
+                "min_rpm",
+                "min_flow",
+                "max_conn_time",
+                "pre_check_summary",
+                "expected_is_ilt",
+                "expected_ilt_seconds"
+            ],
             partialVariables: { format_instructions: outputParser.getFormatInstructions() }
         });
 
         const chain = prompt.pipe(model).pipe(outputParser);
-        const result = await chain.invoke({
+        const rawResult = await chain.invoke({
             declared_op: data.metadata.active_operation,
             telemetry_data: JSON.stringify(data.telemetry),
             min_wob: sopConfig.min_wob,
             min_rpm: sopConfig.min_rpm,
             min_flow: sopConfig.min_flow,
-            max_conn_time: sopConfig.max_conn_time
+            max_conn_time: sopConfig.max_conn_time,
+            pre_check_summary: preCheck.summary,
+            expected_is_ilt: String(preCheck.is_ilt),
+            expected_ilt_seconds: String(preCheck.ilt_duration_seconds)
         });
 
         endTimer({ status: 'success' });
 
+        // Guard against 1.5B model boolean/duration hallucinations using deterministic SOP evaluation
+        const rawConfidence = Number(rawResult.confidence_score);
+        const normalizedConfidence = Number.isFinite(rawConfidence)
+            ? (rawConfidence > 1 ? Number((rawConfidence / 100).toFixed(2)) : Number(rawConfidence.toFixed(2)))
+            : 0.95;
+
         const rig_id = data.metadata.rig_id;
         const well_id = data.metadata.well_id;
-        const actual_state = result.actual_state || 'unknown';
+        const actual_state = preCheck.actual_state || rawResult.actual_state || 'unknown';
+        const is_ilt = preCheck.is_ilt;
+        const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
 
         aiDecisionsCounter.inc({
             rig_id,
             well_id,
             actual_state,
-            is_ilt: String(Boolean(result.is_ilt))
+            is_ilt: String(Boolean(is_ilt))
         });
 
-        if (result.is_ilt) {
+        if (is_ilt) {
             iltDetectionCounter.inc({ rig_id, well_id, actual_state });
-            const durationSec = Math.max(0, Number(result.ilt_duration_seconds) || 0);
-            if (durationSec > 0) {
-                iltDurationSecondsCounter.inc({ rig_id, well_id, actual_state }, durationSec);
+            if (ilt_duration_seconds > 0) {
+                iltDurationSecondsCounter.inc({ rig_id, well_id, actual_state }, ilt_duration_seconds);
             }
         }
 
         const enrichedResult = {
-            ...result,
+            actual_state,
+            is_ilt,
+            ilt_duration_seconds,
+            confidence_score: normalizedConfidence,
+            justification: rawResult.justification,
             rig_id,
             well_id,
             declared_op: data.metadata.active_operation,
@@ -143,8 +253,38 @@ Output raw JSON. Your 'justification' field must strictly state the factual math
     }
 }
 
+async function drainInferenceQueue() {
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+    updateQueueMetric();
+
+    while (inferenceQueue.length > 0) {
+        const nextItem = inferenceQueue.shift();
+        updateQueueMetric();
+        try {
+            const res = await processSingleBatch(nextItem.data);
+            nextItem.resolve(res);
+        } catch (err) {
+            nextItem.resolve(undefined);
+        }
+    }
+
+    isProcessingQueue = false;
+    updateQueueMetric();
+}
+
+function analyzeRigStateAsync(data) {
+    return new Promise((resolve) => {
+        inferenceQueue.push({ data, resolve });
+        updateQueueMetric();
+        drainInferenceQueue();
+    });
+}
+
 module.exports = {
     analyzeRigStateAsync,
+    evaluateSopDeterministic,
+    getQueueStatus,
     telemetryEvents,
     getSopConfig,
     updateSopConfig,

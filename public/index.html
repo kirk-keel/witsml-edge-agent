@@ -4,19 +4,64 @@
     <meta charset="UTF-8">
     <title>Rig-412 Edge AI Dashboard</title>
     <style>
-        body { background: #0f172a; color: #38bdf8; font-family: monospace; padding: 20px; }
+        * { box-sizing: border-box; }
+        body { background: #0f172a; color: #38bdf8; font-family: monospace; padding: 20px; margin: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+        .header h2 { margin: 0; }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .btn-action { background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold; text-decoration: none; width: auto; }
+        .btn-action:hover { background: #0284c7; color: #fff; }
+        .btn-warn { border-color: #f59e0b; color: #f59e0b; }
+        .btn-warn:hover { background: #d97706; color: #fff; }
+        .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 20px; }
+        .kpi-card { background: #1e293b; border: 1px solid #334155; padding: 14px; border-radius: 8px; text-align: center; }
+        .kpi-label { color: #94a3b8; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; }
+        .kpi-value { font-size: 24px; font-weight: bold; color: #f8fafc; }
+        .kpi-value.ilt { color: #ef4444; }
+        .kpi-value.ok { color: #10b981; }
         .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
         .panel { background: #1e293b; border: 1px solid #334155; padding: 20px; border-radius: 8px; }
-        input { background: #0f172a; color: #10b981; border: 1px solid #475569; padding: 8px; width: 100%; margin-bottom: 15px; }
-        button { background: #0284c7; color: white; border: none; padding: 10px 15px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; }
-        button:hover { background: #0369a1; }
+        input { background: #0f172a; color: #10b981; border: 1px solid #475569; padding: 8px; width: 100%; margin-bottom: 15px; font-family: monospace; }
+        button.primary { background: #0284c7; color: white; border: none; padding: 10px 15px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; font-family: monospace; }
+        button.primary:hover { background: #0369a1; }
         #live-feed { height: 400px; overflow-y: auto; background: #000; padding: 15px; border-radius: 4px; border: 1px solid #334155; }
         .log-normal { color: #10b981; margin-bottom: 8px; }
         .log-ilt { color: #ef4444; font-weight: bold; margin-bottom: 8px; }
     </style>
 </head>
 <body>
-    <h2>WITSML Edge AI | Rig-412</h2>
+    <div class="header">
+        <h2>WITSML Edge AI | Rig-412</h2>
+        <div class="header-actions">
+            <button class="btn-action" onclick="simulateWindow('drilling')">+ Simulate Drilling Window</button>
+            <button class="btn-action btn-warn" onclick="simulateWindow('connection')">+ Simulate Connection ILT</button>
+            <a class="btn-action" id="grafana-link" target="_blank" rel="noopener">Open Grafana (:3001)</a>
+        </div>
+    </div>
+
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="kpi-label">Telemetry Batches</div>
+            <div class="kpi-value" id="kpi-batches">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">AI Decisions</div>
+            <div class="kpi-value ok" id="kpi-decisions">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">ILT Events Detected</div>
+            <div class="kpi-value ilt" id="kpi-ilt">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">Cumulative ILT Lost Time</div>
+            <div class="kpi-value ilt" id="kpi-ilt-sec">0s</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">AI Inference Queue</div>
+            <div class="kpi-value" id="kpi-queue">0</div>
+        </div>
+    </div>
+
     <div class="grid">
         <div class="panel">
             <h3>SOP Firewall Settings</h3>
@@ -28,15 +73,18 @@
             <input type="number" id="flow">
             <label>Max Connection Time (s):</label>
             <input type="number" id="conn">
-            <button onclick="saveSOP()">Deploy SOPs to Edge Model</button>
+            <button class="primary" onclick="saveSOP()">Deploy SOPs to Edge Model</button>
         </div>
         <div class="panel">
-            <h3>Live Qwen 3B Telemetry Stream</h3>
+            <h3>Live Qwen 1.5B Telemetry Stream</h3>
             <div id="live-feed">Waiting for WITSML telemetry...</div>
         </div>
     </div>
 
     <script>
+        document.getElementById('grafana-link').href =
+            `${window.location.protocol}//${window.location.hostname}:3001/d/witsml-edge-overview/witsml-edge-ai-and-rig-telemetry-overview`;
+
         // Load existing SOPs on page load
         fetch('/api/sops').then(res => res.json()).then(data => {
             document.getElementById('wob').value = data.min_wob;
@@ -44,6 +92,19 @@
             document.getElementById('flow').value = data.min_flow;
             document.getElementById('conn').value = data.max_conn_time;
         });
+
+        function refreshStats() {
+            fetch('/api/stats')
+                .then(res => res.json())
+                .then(stats => {
+                    document.getElementById('kpi-batches').textContent = stats.total_batches ?? 0;
+                    document.getElementById('kpi-decisions').textContent = stats.total_decisions ?? 0;
+                    document.getElementById('kpi-ilt').textContent = stats.ilt_count ?? 0;
+                    document.getElementById('kpi-ilt-sec').textContent = `${stats.total_ilt_seconds ?? 0}s`;
+                    document.getElementById('kpi-queue').textContent = stats.queue?.total_pending ?? 0;
+                })
+                .catch(() => {});
+        }
 
         // Save new SOPs and update backend
         function saveSOP() {
@@ -59,6 +120,46 @@
             }).then(() => alert('SOPs successfully deployed to Edge AI memory!'));
         }
 
+        function simulateWindow(mode) {
+            const start = Date.now();
+            const isDrilling = mode === 'drilling';
+            const points = isDrilling
+                ? [{ depth: 10045, wob: 18, rpm: 122, flow: 405, spp: 2850, block_pos: 65 }]
+                : [
+                    { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 },
+                    { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 },
+                    { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 }
+                ];
+
+            const payload = {
+                metadata: {
+                    well_id: 'WL-9924',
+                    rig_id: 'Rig-412',
+                    window_start: new Date(start).toISOString(),
+                    window_end: new Date(start + 5 * 60000).toISOString(),
+                    interval_seconds: 10,
+                    active_operation: isDrilling ? 'drilling' : 'connection'
+                },
+                telemetry: points.map((pt, i) => ({
+                    timestamp: new Date(start + i * 10000).toISOString(),
+                    hole_depth_ft: pt.depth,
+                    bit_depth_ft: pt.depth,
+                    block_pos_ft: pt.block_pos,
+                    hook_load_klbs: 240.0,
+                    wob_klbs: pt.wob,
+                    spp_psi: pt.spp,
+                    flow_in_gpm: pt.flow,
+                    rpm: pt.rpm
+                }))
+            };
+
+            fetch('/api/v1/telemetry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(() => refreshStats());
+        }
+
         function appendDecision(data, clearPlaceholder = false) {
             const feed = document.getElementById('live-feed');
             if (clearPlaceholder || feed.textContent === 'Waiting for WITSML telemetry...') {
@@ -66,14 +167,17 @@
             }
             const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
             const cssClass = data.is_ilt ? 'log-ilt' : 'log-normal';
-            const status = data.is_ilt ? 'ILT DETECTED' : 'NORMAL';
+            const status = data.is_ilt ? `ILT DETECTED (${data.ilt_duration_seconds || 0}s)` : 'NORMAL';
             const rigTag = data.rig_id ? `[${data.rig_id}] ` : '';
 
             feed.innerHTML += `<div class="${cssClass}">[${time}] ${rigTag}[${status}] ${data.justification}</div>`;
             feed.scrollTop = feed.scrollHeight;
         }
 
-        // Hydrate recent decisions from TimescaleDB on page load
+        // Hydrate recent decisions and stats from TimescaleDB on page load
+        refreshStats();
+        setInterval(refreshStats, 5000);
+
         fetch('/api/decisions?limit=20')
             .then(res => res.json())
             .then(({ decisions }) => {
@@ -90,6 +194,7 @@
         source.onmessage = function(event) {
             const data = JSON.parse(event.data);
             appendDecision(data);
+            refreshStats();
         };
     </script>
 </body>

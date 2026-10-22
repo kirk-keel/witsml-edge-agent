@@ -50,6 +50,12 @@ const aiDecisionsCounter = new client.Counter({
     registers: [register]
 });
 
+const aiQueueDepthGauge = new client.Gauge({
+    name: 'witsml_ai_queue_depth',
+    help: 'Current number of telemetry batches waiting or actively running in the AI inference queue',
+    registers: [register]
+});
+
 module.exports = {
     register,
     telemetryIngestionCounter,
@@ -57,5 +63,6 @@ module.exports = {
     aiInferenceLatencyHistogram,
     iltDetectionCounter,
     iltDurationSecondsCounter,
-    aiDecisionsCounter
+    aiDecisionsCounter,
+    aiQueueDepthGauge
 };

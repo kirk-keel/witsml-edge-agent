@@ -1,8 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { telemetryEvents, getSopConfig, updateSopConfig } = require('./services/ai');
-const { getRecentAiDecisions } = require('./services/db');
+const { telemetryEvents, getSopConfig, updateSopConfig, getQueueStatus } = require('./services/ai');
+const { getRecentAiDecisions, getTelemetryStats } = require('./services/db');
 const { router: telemetryRouter } = require('./routes/telemetry');
 const { register } = require('./utils/metrics');
 
@@ -40,6 +40,11 @@ app.post('/api/sops', (req, res) => {
 app.get('/api/decisions', async (req, res) => {
     const decisions = await getRecentAiDecisions(req.query.limit);
     res.json({ decisions });
+});
+
+app.get('/api/stats', async (req, res) => {
+    const stats = await getTelemetryStats();
+    res.json({ ...stats, queue: getQueueStatus() });
 });
 
 // --- SERVER-SENT EVENTS (SSE) STREAM via EventEmitter ---

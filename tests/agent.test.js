@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const app = require('../src/index');
-const { DEFAULT_SOP_CONFIG, updateSopConfig } = require('../src/services/ai');
+const { DEFAULT_SOP_CONFIG, updateSopConfig, evaluateSopDeterministic } = require('../src/services/ai');
 
 const sopFilePath = path.join(__dirname, '../src/sop-config.json');
 
@@ -36,7 +36,7 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.deepEqual(body, { status: 'healthy', service: 'witsml-edge-agent' });
     });
 
-    it('GET /metrics exposes Prometheus metrics for telemetry, AI latency, and ILT', async () => {
+    it('GET /metrics exposes Prometheus metrics for telemetry, AI latency, ILT, and queue depth', async () => {
         const res = await fetch(`${baseUrl}/metrics`);
         assert.equal(res.status, 200);
         assert.match(res.headers.get('content-type'), /text\/plain/);
@@ -47,6 +47,46 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.match(text, /witsml_ilt_detections_total/);
         assert.match(text, /witsml_ilt_duration_seconds_total/);
         assert.match(text, /witsml_ai_decisions_total/);
+        assert.match(text, /witsml_ai_queue_depth/);
+    });
+
+    it('evaluateSopDeterministic prevents false-positive ILT on normal drilling and flags connection ILT', () => {
+        const start = Date.now();
+        const normalDrilling = evaluateSopDeterministic(
+            {
+                metadata: {
+                    active_operation: 'drilling',
+                    window_start: new Date(start).toISOString(),
+                    window_end: new Date(start + 300000).toISOString(),
+                    interval_seconds: 10
+                },
+                telemetry: [{ wob_klbs: 18, rpm: 125, flow_in_gpm: 405 }]
+            },
+            DEFAULT_SOP_CONFIG
+        );
+        assert.equal(normalDrilling.is_ilt, false);
+        assert.equal(normalDrilling.ilt_duration_seconds, 0);
+        assert.equal(normalDrilling.actual_state, 'drilling');
+
+        const connectionIlt = evaluateSopDeterministic(
+            {
+                metadata: {
+                    active_operation: 'connection',
+                    window_start: new Date(start).toISOString(),
+                    window_end: new Date(start + 300000).toISOString(),
+                    interval_seconds: 10
+                },
+                telemetry: [
+                    { wob_klbs: 0, rpm: 0, flow_in_gpm: 0 },
+                    { wob_klbs: 0, rpm: 0, flow_in_gpm: 0 },
+                    { wob_klbs: 0, rpm: 0, flow_in_gpm: 0 }
+                ]
+            },
+            DEFAULT_SOP_CONFIG
+        );
+        assert.equal(connectionIlt.is_ilt, true);
+        assert.equal(connectionIlt.ilt_duration_seconds, 120);
+        assert.equal(connectionIlt.actual_state, 'connection');
     });
 
     it('GET and POST /api/sops manage runtime SOP thresholds', async () => {
@@ -151,10 +191,17 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         );
     });
 
-    it('GET /api/decisions returns 200 with a decisions array', async () => {
-        const res = await fetch(`${baseUrl}/api/decisions?limit=5`);
-        assert.equal(res.status, 200);
-        const body = await res.json();
-        assert.ok(Array.isArray(body.decisions));
+    it('GET /api/decisions and GET /api/stats return structured responses', async () => {
+        const decRes = await fetch(`${baseUrl}/api/decisions?limit=5`);
+        assert.equal(decRes.status, 200);
+        const decBody = await decRes.json();
+        assert.ok(Array.isArray(decBody.decisions));
+
+        const statsRes = await fetch(`${baseUrl}/api/stats`);
+        assert.equal(statsRes.status, 200);
+        const statsBody = await statsRes.json();
+        assert.equal(typeof statsBody.total_batches, 'number');
+        assert.equal(typeof statsBody.total_decisions, 'number');
+        assert.equal(typeof statsBody.queue?.total_pending, 'number');
     });
 });

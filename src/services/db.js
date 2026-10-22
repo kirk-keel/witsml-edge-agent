@@ -19,9 +19,11 @@ async function ensureDecisionColumns() {
         ADD COLUMN IF NOT EXISTS well_id VARCHAR(50),
         ADD COLUMN IF NOT EXISTS declared_op VARCHAR(50);
     `);
+    await pool.query(`SELECT add_retention_policy('telemetry_batches', INTERVAL '30 days', if_not_exists => TRUE);`);
+    await pool.query(`SELECT add_retention_policy('ai_decisions', INTERVAL '90 days', if_not_exists => TRUE);`);
     schemaChecked = true;
   } catch (err) {
-    console.warn("[TimescaleDB] Could not verify ai_decisions columns:", err.message);
+    console.warn("[TimescaleDB] Could not verify schema/retention policies:", err.message);
   }
 }
 
@@ -81,4 +83,46 @@ async function getRecentAiDecisions(limit = 25) {
   }
 }
 
-module.exports = { pool, saveTelemetryBatch, saveAiDecision, getRecentAiDecisions };
+async function getTelemetryStats() {
+  try {
+    await ensureDecisionColumns();
+    const batchRes = await pool.query(`SELECT COUNT(*)::int AS total_batches FROM telemetry_batches`);
+    const decRes = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total_decisions,
+        COUNT(*) FILTER (WHERE is_ilt = true)::int AS ilt_count,
+        COUNT(*) FILTER (WHERE is_ilt = false)::int AS normal_count,
+        COALESCE(SUM(ilt_duration_seconds) FILTER (WHERE is_ilt = true), 0)::int AS total_ilt_seconds,
+        COALESCE(ROUND(AVG(confidence_score), 2), 0)::float AS avg_confidence
+      FROM ai_decisions
+    `);
+    return {
+      total_batches: batchRes.rows[0]?.total_batches ?? 0,
+      ...(decRes.rows[0] || {
+        total_decisions: 0,
+        ilt_count: 0,
+        normal_count: 0,
+        total_ilt_seconds: 0,
+        avg_confidence: 0
+      })
+    };
+  } catch (err) {
+    console.error("[TimescaleDB Error] Fetching telemetry stats:", err.message);
+    return {
+      total_batches: 0,
+      total_decisions: 0,
+      ilt_count: 0,
+      normal_count: 0,
+      total_ilt_seconds: 0,
+      avg_confidence: 0
+    };
+  }
+}
+
+module.exports = {
+  pool,
+  saveTelemetryBatch,
+  saveAiDecision,
+  getRecentAiDecisions,
+  getTelemetryStats
+};

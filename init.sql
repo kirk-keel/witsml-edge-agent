@@ -25,3 +25,6 @@ ALTER TABLE ai_decisions
     ADD COLUMN IF NOT EXISTS rig_id VARCHAR(50),
     ADD COLUMN IF NOT EXISTS well_id VARCHAR(50),
     ADD COLUMN IF NOT EXISTS declared_op VARCHAR(50);
+
+SELECT add_retention_policy('telemetry_batches', INTERVAL '30 days', if_not_exists => TRUE);
+SELECT add_retention_policy('ai_decisions', INTERVAL '90 days', if_not_exists => TRUE);
