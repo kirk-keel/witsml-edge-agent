@@ -1,36 +1,55 @@
-const express = require("express");
-const router = express.Router();
-const { telemetryEvents } = require("../services/ai");
 const { saveTelemetryBatch } = require("../services/db");
+const express = require('express');
+const { z } = require('zod');
+const { analyzeRigStateAsync } = require('../services/ai');
 
-router.post("/", async (req, res) => {
-  try {
-    const { well_id, rig_id, telemetry } = req.body;
-    
-    await saveTelemetryBatch(rig_id || "Rig-412", well_id || "WL-9924", telemetry || req.body);
+const router = express.Router();
 
-    res.status(202).json({
-      status: "accepted",
-      message: "Telemetry batch queued for AI analysis",
-      well_id: well_id || "WL-9924",
-      rig_id: rig_id || "Rig-412"
-    });
-
-    setTimeout(() => {
-      const sampleDecision = {
-        actual_state: telemetry?.operational_state || "drilling",
-        is_ilt: true,
-        ilt_duration_seconds: 180,
-        confidence_score: 0.95,
-        justification: "Simulated high-confidence operational assessment."
-      };
-      telemetryEvents.emit("assessment", sampleDecision);
-    }, 1000);
-
-  } catch (err) {
-    console.error("Error processing telemetry route:", err);
-    res.status(500).json({ error: err.message });
-  }
+const telemetrySchema = z.object({
+    metadata: z.object({
+        well_id: z.string(),
+        rig_id: z.string(),
+        window_start: z.string().datetime(),
+        window_end: z.string().datetime(),
+        interval_seconds: z.number().int().positive(),
+        active_operation: z.string()
+    }),
+    telemetry: z.array(z.object({
+        timestamp: z.string().datetime(),
+        hole_depth_ft: z.number(),
+        bit_depth_ft: z.number(),
+        block_pos_ft: z.number(),
+        hook_load_klbs: z.number(),
+        wob_klbs: z.number(),
+        spp_psi: z.number(),
+        flow_in_gpm: z.number(),
+        rpm: z.number()
+    })).min(1)
 });
 
-module.exports = router;
+async function handleTelemetryIngestion(req, res) {
+    try {
+        const validatedData = telemetrySchema.parse(req.body);
+        console.log(`[Agent] Received telemetry payload for ${validatedData.metadata.rig_id} (${validatedData.metadata.well_id})`);
+
+        await saveTelemetryBatch(validatedData.metadata.rig_id, validatedData.metadata.well_id, validatedData);
+        analyzeRigStateAsync(validatedData);
+
+        return res.status(202).json({
+            status: 'accepted',
+            message: 'Telemetry batch queued for AI analysis',
+            well_id: validatedData.metadata.well_id,
+            rig_id: validatedData.metadata.rig_id
+        });
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ status: 'error', message: 'Invalid schema', issues: error.issues });
+        }
+        return res.status(500).json({ status: 'error', message: 'Server error' });
+    }
+}
+
+router.post('/api/v1/telemetry', handleTelemetryIngestion);
+router.post('/api/witsml', handleTelemetryIngestion);
+
+module.exports = { router, telemetrySchema };

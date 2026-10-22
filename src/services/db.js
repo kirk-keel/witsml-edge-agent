@@ -10,33 +10,31 @@ const pool = new Pool({
 
 async function saveTelemetryBatch(rigId, wellId, payload) {
   try {
-    const query = `
-      INSERT INTO telemetry_batches (rig_id, well_id, payload)
-      VALUES ($1, $2, $3)
-    `;
-    await pool.query(query, [rigId, wellId, JSON.stringify(payload)]);
-    console.log("Saved telemetry batch to TimescaleDB");
+    await pool.query(
+      "INSERT INTO telemetry_batches (rig_id, well_id, payload) VALUES ($1, $2, $3)",
+      [rigId, wellId, JSON.stringify(payload)]
+    );
+    console.log("[TimescaleDB] Saved telemetry batch for " + rigId);
   } catch (err) {
-    console.error("Error saving telemetry batch to TimescaleDB:", err.message);
+    console.error("[TimescaleDB Error] Saving batch:", err.message);
   }
 }
 
 async function saveAiDecision(decision) {
   try {
-    const query = `
-      INSERT INTO ai_decisions (actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification)
-      VALUES ($1, $2, $3, $4, $5)
-    `;
-    await pool.query(query, [
-      decision.actual_state,
-      decision.is_ilt,
-      decision.ilt_duration_seconds,
-      decision.confidence_score,
-      decision.justification
-    ]);
-    console.log("Saved AI decision to TimescaleDB");
+    await pool.query(
+      "INSERT INTO ai_decisions (actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification) VALUES ($1, $2, $3, $4, $5)",
+      [
+        decision.actual_state,
+        decision.is_ilt,
+        Math.round(Number(decision.ilt_duration_seconds) || 0),
+        Number(decision.confidence_score) || 0,
+        decision.justification
+      ]
+    );
+    console.log("[TimescaleDB] Saved AI decision: " + decision.actual_state);
   } catch (err) {
-    console.error("Error saving AI decision to TimescaleDB:", err.message);
+    console.error("[TimescaleDB Error] Saving AI decision:", err.message);
   }
 }
 
