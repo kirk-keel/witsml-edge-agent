@@ -7,7 +7,8 @@ const {
     DEFAULT_SOP_CONFIG,
     updateSopConfig,
     evaluateSopDeterministic,
-    sanitizeJustification
+    sanitizeJustification,
+    compactTelemetryForPrompt
 } = require('../src/services/ai');
 
 const sopFilePath = path.join(__dirname, '../src/sop-config.json');
@@ -99,6 +100,19 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(connectionIlt.is_ilt, true);
         assert.equal(connectionIlt.ilt_duration_seconds, 120);
         assert.equal(connectionIlt.actual_state, 'connection');
+
+        const manyPoints = Array.from({ length: 10 }, (_, i) => ({
+            wob_klbs: 20,
+            rpm: 120,
+            flow_in_gpm: 400,
+            spp_psi: 2800,
+            hook_load_klbs: 240,
+            seq: i
+        }));
+        const compacted = JSON.parse(compactTelemetryForPrompt(manyPoints));
+        assert.equal(compacted.points_count, 10);
+        assert.equal(compacted.window_averages.wob_klbs, 20);
+        assert.equal(compacted.window_averages.flow_in_gpm, 400);
     });
 
     it('GET and POST /api/sops manage runtime SOP thresholds', async () => {

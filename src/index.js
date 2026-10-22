@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { telemetryEvents, getSopConfig, updateSopConfig, getQueueStatus } = require('./services/ai');
-const { getRecentAiDecisions, getTelemetryStats } = require('./services/db');
+const { pool, getRecentAiDecisions, getTelemetryStats } = require('./services/db');
 const { router: telemetryRouter } = require('./routes/telemetry');
 const { register } = require('./utils/metrics');
 
@@ -52,6 +52,11 @@ app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.write(': connected\n\n');
+
+    const heartbeat = setInterval(() => {
+        res.write(': heartbeat\n\n');
+    }, 25000);
 
     const onAssessment = (aiResult) => {
         res.write(`data: ${JSON.stringify(aiResult)}\n\n`);
@@ -59,6 +64,7 @@ app.get('/api/stream', (req, res) => {
 
     telemetryEvents.on('assessment', onAssessment);
     req.on('close', () => {
+        clearInterval(heartbeat);
         telemetryEvents.off('assessment', onAssessment);
     });
 });
@@ -67,9 +73,19 @@ app.get('/api/stream', (req, res) => {
 app.use('/', telemetryRouter);
 
 if (require.main === module) {
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
         console.log(`WITSML Edge Agent running on port ${PORT}`);
     });
+
+    const shutdown = (signal) => {
+        console.log(`[Agent] Received ${signal}, shutting down gracefully...`);
+        server.close(() => {
+            pool.end().catch(() => {}).finally(() => process.exit(0));
+        });
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 module.exports = app;

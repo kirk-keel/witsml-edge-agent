@@ -18,6 +18,9 @@ async function ensureDecisionColumns() {
         ADD COLUMN IF NOT EXISTS rig_id VARCHAR(50),
         ADD COLUMN IF NOT EXISTS well_id VARCHAR(50),
         ADD COLUMN IF NOT EXISTS declared_op VARCHAR(50);
+      CREATE INDEX IF NOT EXISTS idx_telemetry_batches_rig_time ON telemetry_batches (rig_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_ai_decisions_rig_time ON ai_decisions (rig_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_ai_decisions_is_ilt ON ai_decisions (is_ilt, timestamp DESC);
     `);
     await pool.query(`SELECT add_retention_policy('telemetry_batches', INTERVAL '30 days', if_not_exists => TRUE);`);
     await pool.query(`SELECT add_retention_policy('ai_decisions', INTERVAL '90 days', if_not_exists => TRUE);`);

@@ -28,7 +28,7 @@ const configPath = path.join(__dirname, '../sop-config.json');
 
 let inMemorySopConfig = { ...DEFAULT_SOP_CONFIG };
 
-function getSopConfig() {
+function loadInitialSopConfig() {
     try {
         if (fs.existsSync(configPath)) {
             const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -37,6 +37,10 @@ function getSopConfig() {
     } catch (error) {
         console.warn('[SOP Config] Falling back to in-memory SOP defaults:', error.message);
     }
+}
+loadInitialSopConfig();
+
+function getSopConfig() {
     return { ...inMemorySopConfig };
 }
 
@@ -53,6 +57,30 @@ function updateSopConfig(nextConfig) {
         console.warn('[SOP Config] Persisting to disk failed; retaining in-memory config:', error.message);
     }
     return { ...inMemorySopConfig };
+}
+
+/**
+ * Compacts large telemetry arrays (>5 points) into a concise summary so CPU prompt-prefill
+ * remains fast regardless of window sample count.
+ */
+function compactTelemetryForPrompt(points) {
+    if (!Array.isArray(points) || points.length <= 5) {
+        return JSON.stringify(points);
+    }
+    const count = points.length;
+    const avg = (key) => Number((points.reduce((s, p) => s + Number(p[key] || 0), 0) / count).toFixed(2));
+    return JSON.stringify({
+        points_count: count,
+        first_point: points[0],
+        last_point: points[count - 1],
+        window_averages: {
+            wob_klbs: avg('wob_klbs'),
+            rpm: avg('rpm'),
+            flow_in_gpm: avg('flow_in_gpm'),
+            spp_psi: avg('spp_psi'),
+            hook_load_klbs: avg('hook_load_klbs')
+        }
+    });
 }
 
 /**
@@ -172,6 +200,59 @@ const outputParser = StructuredOutputParser.fromZodSchema(
     })
 );
 
+const promptTemplate = new PromptTemplate({
+    template: `Analyze this WITSML telemetry against the Operating Rules.
+### Rules:
+1. Drilling: WOB > {min_wob}, RPM > {min_rpm}, Flow > {min_flow}. If ALL three are met, is_ilt MUST be false and ilt_duration_seconds MUST be 0.
+2. Connection: Max {max_conn_time}s.
+
+### Pre-Computed Engineering Check:
+{pre_check_summary} -> Expected is_ilt={expected_is_ilt}, Expected ilt_duration_seconds={expected_ilt_seconds}
+
+### Payload:
+Declared: {declared_op}
+Telemetry: {telemetry_data}
+
+### Output:
+{format_instructions}
+Output raw JSON. Your 'justification' field MUST copy the exact inequalities from the Pre-Computed Engineering Check without flipping '>' or '<'.`,
+    inputVariables: [
+        "declared_op",
+        "telemetry_data",
+        "min_wob",
+        "min_rpm",
+        "min_flow",
+        "max_conn_time",
+        "pre_check_summary",
+        "expected_is_ilt",
+        "expected_ilt_seconds"
+    ],
+    partialVariables: { format_instructions: outputParser.getFormatInstructions() }
+});
+
+let cachedChainKey = null;
+let cachedChain = null;
+
+function getEvaluationChain(modelName) {
+    const baseUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || "http://localhost:11434";
+    const key = `${baseUrl}::${modelName}`;
+    if (cachedChain && cachedChainKey === key) {
+        return cachedChain;
+    }
+    const model = new ChatOllama({
+        baseUrl,
+        model: modelName,
+        temperature: 0,
+        format: "json",
+        numCtx: 512,
+        numPredict: 120,
+        keepAlive: "24h"
+    });
+    cachedChainKey = key;
+    cachedChain = promptTemplate.pipe(model).pipe(outputParser);
+    return cachedChain;
+}
+
 // Bounded FIFO Inference Queue (concurrency = 1) to protect edge CPU
 const inferenceQueue = [];
 let isProcessingQueue = false;
@@ -194,47 +275,10 @@ async function processSingleBatch(data) {
     const sopConfig = getSopConfig();
     const preCheck = evaluateSopDeterministic(data, sopConfig);
     try {
-        const model = new ChatOllama({
-            baseUrl: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || "http://localhost:11434",
-            model: modelName,
-            temperature: 0,
-            format: "json"
-        });
-
-        const prompt = new PromptTemplate({
-            template: `Analyze this WITSML telemetry against the Operating Rules.
-### Rules:
-1. Drilling: WOB > {min_wob}, RPM > {min_rpm}, Flow > {min_flow}. If ALL three are met, is_ilt MUST be false and ilt_duration_seconds MUST be 0.
-2. Connection: Max {max_conn_time}s.
-
-### Pre-Computed Engineering Check:
-{pre_check_summary} -> Expected is_ilt={expected_is_ilt}, Expected ilt_duration_seconds={expected_ilt_seconds}
-
-### Payload:
-Declared: {declared_op}
-Telemetry: {telemetry_data}
-
-### Output:
-{format_instructions}
-Output raw JSON. Your 'justification' field MUST copy the exact inequalities from the Pre-Computed Engineering Check without flipping '>' or '<'.`,
-            inputVariables: [
-                "declared_op",
-                "telemetry_data",
-                "min_wob",
-                "min_rpm",
-                "min_flow",
-                "max_conn_time",
-                "pre_check_summary",
-                "expected_is_ilt",
-                "expected_ilt_seconds"
-            ],
-            partialVariables: { format_instructions: outputParser.getFormatInstructions() }
-        });
-
-        const chain = prompt.pipe(model).pipe(outputParser);
+        const chain = getEvaluationChain(modelName);
         const rawResult = await chain.invoke({
             declared_op: data.metadata.active_operation,
-            telemetry_data: JSON.stringify(data.telemetry),
+            telemetry_data: compactTelemetryForPrompt(data.telemetry),
             min_wob: sopConfig.min_wob,
             min_rpm: sopConfig.min_rpm,
             min_flow: sopConfig.min_flow,
@@ -365,6 +409,7 @@ module.exports = {
     analyzeRigStateAsync,
     evaluateSopDeterministic,
     sanitizeJustification,
+    compactTelemetryForPrompt,
     getQueueStatus,
     telemetryEvents,
     getSopConfig,
