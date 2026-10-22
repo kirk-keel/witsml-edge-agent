@@ -2,6 +2,7 @@ const { saveTelemetryBatch } = require("../services/db");
 const express = require('express');
 const { z } = require('zod');
 const { analyzeRigStateAsync } = require('../services/ai');
+const { telemetryIngestionCounter, telemetryPointsCounter } = require('../utils/metrics');
 
 const router = express.Router();
 
@@ -30,21 +31,39 @@ const telemetrySchema = z.object({
 async function handleTelemetryIngestion(req, res) {
     try {
         const validatedData = telemetrySchema.parse(req.body);
-        console.log(`[Agent] Received telemetry payload for ${validatedData.metadata.rig_id} (${validatedData.metadata.well_id})`);
+        const { rig_id, well_id, active_operation } = validatedData.metadata;
+        console.log(`[Agent] Received telemetry payload for ${rig_id} (${well_id})`);
 
-        await saveTelemetryBatch(validatedData.metadata.rig_id, validatedData.metadata.well_id, validatedData);
+        telemetryIngestionCounter.inc({
+            rig_id,
+            well_id,
+            active_operation,
+            status: 'accepted'
+        });
+        telemetryPointsCounter.inc(
+            { rig_id, well_id },
+            validatedData.telemetry.length
+        );
+
+        await saveTelemetryBatch(rig_id, well_id, validatedData);
         analyzeRigStateAsync(validatedData);
 
         return res.status(202).json({
             status: 'accepted',
             message: 'Telemetry batch queued for AI analysis',
-            well_id: validatedData.metadata.well_id,
-            rig_id: validatedData.metadata.rig_id
+            well_id,
+            rig_id
         });
     } catch (error) {
+        const rig_id = req.body?.metadata?.rig_id || 'unknown';
+        const well_id = req.body?.metadata?.well_id || 'unknown';
+        const active_operation = req.body?.metadata?.active_operation || 'unknown';
+
         if (error instanceof z.ZodError) {
+            telemetryIngestionCounter.inc({ rig_id, well_id, active_operation, status: 'validation_error' });
             return res.status(400).json({ status: 'error', message: 'Invalid schema', issues: error.issues });
         }
+        telemetryIngestionCounter.inc({ rig_id, well_id, active_operation, status: 'server_error' });
         return res.status(500).json({ status: 'error', message: 'Server error' });
     }
 }

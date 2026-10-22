@@ -7,6 +7,12 @@ const { PromptTemplate } = require("@langchain/core/prompts");
 const { StructuredOutputParser } = require("@langchain/core/output_parsers");
 const { z } = require("zod");
 const { logAiDecision } = require('../utils/logger');
+const {
+    aiInferenceLatencyHistogram,
+    iltDetectionCounter,
+    iltDurationSecondsCounter,
+    aiDecisionsCounter
+} = require('../utils/metrics');
 
 const telemetryEvents = new EventEmitter();
 
@@ -59,12 +65,14 @@ const outputParser = StructuredOutputParser.fromZodSchema(
 );
 
 async function analyzeRigStateAsync(data) {
+    const modelName = process.env.OLLAMA_MODEL_NAME || "qwen2.5:1.5b";
+    const endTimer = aiInferenceLatencyHistogram.startTimer({ model: modelName });
     try {
         const sopConfig = getSopConfig();
 
         const model = new ChatOllama({
             baseUrl: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || "http://localhost:11434",
-            model: process.env.OLLAMA_MODEL_NAME || "qwen2.5:1.5b",
+            model: modelName,
             temperature: 0,
             format: "json"
         });
@@ -96,11 +104,33 @@ Output raw JSON. Your 'justification' field must strictly state the factual math
             max_conn_time: sopConfig.max_conn_time
         });
 
+        endTimer({ status: 'success' });
+
+        const rig_id = data.metadata.rig_id;
+        const well_id = data.metadata.well_id;
+        const actual_state = result.actual_state || 'unknown';
+
+        aiDecisionsCounter.inc({
+            rig_id,
+            well_id,
+            actual_state,
+            is_ilt: String(Boolean(result.is_ilt))
+        });
+
+        if (result.is_ilt) {
+            iltDetectionCounter.inc({ rig_id, well_id, actual_state });
+            const durationSec = Math.max(0, Number(result.ilt_duration_seconds) || 0);
+            if (durationSec > 0) {
+                iltDurationSecondsCounter.inc({ rig_id, well_id, actual_state }, durationSec);
+            }
+        }
+
         telemetryEvents.emit('assessment', result);
         logAiDecision(data.metadata, "local-compute-0-cost", result);
         await saveAiDecision(result);
         return result;
     } catch (error) {
+        endTimer({ status: 'error' });
         console.error("[Agent Error] AI Processing Failed:", error);
     }
 }

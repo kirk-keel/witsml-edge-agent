@@ -29,4 +29,5 @@ jobs:
           key: ${{ secrets.GCP_SSH_KEY }}
           script: |
             cd ~/witsml-edge-agent
-            docker compose up -d --build
+            docker build --network=host -t witsml-edge-agent-witsml-agent .
+            docker compose up -d

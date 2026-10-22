@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const { telemetryEvents, getSopConfig, updateSopConfig } = require('./services/ai');
 const { router: telemetryRouter } = require('./routes/telemetry');
+const { register } = require('./utils/metrics');
 
 const app = express();
 app.use(express.json());
@@ -11,6 +12,16 @@ const PORT = process.env.PORT || 3000;
 // --- HEALTH CHECK ---
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'healthy', service: 'witsml-edge-agent' });
+});
+
+// --- PROMETHEUS METRICS ---
+app.get('/metrics', async (req, res) => {
+    try {
+        res.set('Content-Type', register.contentType);
+        res.end(await register.metrics());
+    } catch (error) {
+        res.status(500).end(error.message);
+    }
 });
 
 // --- DASHBOARD ROUTING & SOP CONFIG ---

@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 
 const logDirectory = path.join(__dirname, '../../logs');
@@ -14,7 +14,7 @@ function logAiDecision(metadata, promptTokens, aiResponse) {
         well_id: metadata.well_id,
         rig_id: metadata.rig_id,
         window_start: metadata.window_start,
-        model_used: process.env.OPENAI_MODEL_NAME || 'unknown',
+        model_used: process.env.OLLAMA_MODEL_NAME || process.env.OPENAI_MODEL_NAME || 'qwen2.5:1.5b',
         token_usage: promptTokens,
         decision: aiResponse,
     };
