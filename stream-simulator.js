@@ -1,6 +1,7 @@
-const http = require('https');
+const http = require('http');
+const https = require('https');
 
-const PORT = process.env.PORT || 443;
+const AGENT_URL = process.env.AGENT_URL || `https://agent.kcklayton.com:${process.env.PORT || 443}`;
 
 function makeWindow(activeOperation, points) {
     const start = Date.now();
@@ -43,18 +44,21 @@ const payloads = [
 ];
 
 async function sendPayload(data, scenario) {
-    console.log(`\n[Simulator] Dispatching 5-minute window. Scenario: ${scenario}`);
+    console.log(`\n[Simulator] Dispatching 5-minute window to ${AGENT_URL}. Scenario: ${scenario}`);
     const postData = JSON.stringify(data);
+    const parsedUrl = new URL('/api/v1/telemetry', AGENT_URL);
+    const transport = parsedUrl.protocol === 'https:' ? https : http;
+
     const options = {
-        hostname: 'agent.kcklayton.com',
-        port: PORT,
-        path: '/api/v1/telemetry',
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+        path: parsedUrl.pathname,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
     };
 
     return new Promise((resolve) => {
-        const req = http.request(options, (res) => {
+        const req = transport.request(options, (res) => {
             let body = '';
             res.on('data', chunk => body += chunk);
             res.on('end', () => {
@@ -62,7 +66,10 @@ async function sendPayload(data, scenario) {
                 resolve();
             });
         });
-        req.on('error', (e) => console.error(`Error: ${e.message}`));
+        req.on('error', (e) => {
+            console.error(`Error: ${e.message}`);
+            resolve();
+        });
         req.write(postData);
         req.end();
     });

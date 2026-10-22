@@ -191,10 +191,9 @@ function getQueueStatus() {
 async function processSingleBatch(data) {
     const modelName = process.env.OLLAMA_MODEL_NAME || "qwen2.5:1.5b";
     const endTimer = aiInferenceLatencyHistogram.startTimer({ model: modelName });
+    const sopConfig = getSopConfig();
+    const preCheck = evaluateSopDeterministic(data, sopConfig);
     try {
-        const sopConfig = getSopConfig();
-        const preCheck = evaluateSopDeterministic(data, sopConfig);
-
         const model = new ChatOllama({
             baseUrl: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || "http://localhost:11434",
             model: modelName,
@@ -292,7 +291,45 @@ Output raw JSON. Your 'justification' field MUST copy the exact inequalities fro
         return enrichedResult;
     } catch (error) {
         endTimer({ status: 'error' });
-        console.error("[Agent Error] AI Processing Failed:", error);
+        console.error("[Agent Error] AI Processing Failed, applying deterministic SOP failover:", error.message);
+
+        const rig_id = data.metadata.rig_id;
+        const well_id = data.metadata.well_id;
+        const actual_state = preCheck.actual_state || 'unknown';
+        const is_ilt = preCheck.is_ilt;
+        const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
+
+        aiDecisionsCounter.inc({
+            rig_id,
+            well_id,
+            actual_state,
+            is_ilt: String(Boolean(is_ilt))
+        });
+
+        if (is_ilt) {
+            iltDetectionCounter.inc({ rig_id, well_id, actual_state });
+            if (ilt_duration_seconds > 0) {
+                iltDurationSecondsCounter.inc({ rig_id, well_id, actual_state }, ilt_duration_seconds);
+            }
+        }
+
+        const fallbackResult = {
+            actual_state,
+            is_ilt,
+            ilt_duration_seconds,
+            confidence_score: 1.0,
+            justification: `[Deterministic SOP Failover] ${preCheck.factual_justification}`,
+            rig_id,
+            well_id,
+            declared_op: data.metadata.active_operation,
+            fallback: true,
+            timestamp: new Date().toISOString()
+        };
+
+        telemetryEvents.emit('assessment', fallbackResult);
+        logAiDecision(data.metadata, "deterministic-sop-fallback", fallbackResult);
+        await saveAiDecision(fallbackResult, data.metadata);
+        return fallbackResult;
     }
 }
 
