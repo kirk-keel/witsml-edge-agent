@@ -11,6 +11,8 @@ const {
     compactTelemetryForPrompt
 } = require('../src/services/ai');
 const { computeDrillingMechanics } = require('../src/utils/mechanics');
+const { evaluateWellControl } = require('../src/utils/wellcontrol');
+const { enqueueSpoolRecord, flushSpool, clearSpool, getSpoolStatus } = require('../src/utils/spooler');
 
 const sopFilePath = path.join(__dirname, '../src/sop-config.json');
 
@@ -30,6 +32,7 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
 
     after(async () => {
         updateSopConfig(DEFAULT_SOP_CONFIG);
+        clearSpool();
         if (fs.existsSync(sopFilePath)) {
             fs.unlinkSync(sopFilePath);
         }
@@ -58,6 +61,43 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.match(text, /witsml_ilt_cost_usd_total/);
         assert.match(text, /witsml_drilling_rop_fphr/);
         assert.match(text, /witsml_drilling_mse_psi/);
+        assert.match(text, /witsml_well_control_events_total/);
+        assert.match(text, /witsml_edge_spool_pending/);
+    });
+
+    it('evaluateWellControl detects kick_warning, lost_circulation, and normal returns', async () => {
+        const kick = evaluateWellControl([
+            { flow_in_gpm: 400, flow_out_gpm: 455, pit_gain_bbl: 7.2, gas_units: 620, spp_psi: 2700 }
+        ]);
+        assert.equal(kick.well_control_status, 'kick_warning');
+        assert.equal(kick.severity, 'critical');
+        assert.equal(kick.is_well_control_event, true);
+        assert.equal(kick.differential_flow_gpm, 55);
+
+        const loss = evaluateWellControl([
+            { flow_in_gpm: 400, flow_out_gpm: 350, pit_gain_bbl: -6.5, spp_psi: 2400 }
+        ]);
+        assert.equal(loss.well_control_status, 'lost_circulation');
+        assert.equal(loss.is_well_control_event, true);
+
+        const balanced = evaluateWellControl([
+            { flow_in_gpm: 405, flow_out_gpm: 406, pit_gain_bbl: 0.4, spp_psi: 2850 }
+        ]);
+        assert.equal(balanced.well_control_status, 'normal');
+        assert.equal(balanced.is_well_control_event, false);
+
+        clearSpool();
+        enqueueSpoolRecord('batch', { rigId: 'Rig-412', wellId: 'WL-9924', payload: {} });
+        assert.equal(getSpoolStatus().pending_count, 1);
+        let replayed = 0;
+        const res = await flushSpool({
+            onBatch: async () => {
+                replayed++;
+            }
+        });
+        assert.equal(res.flushed, 1);
+        assert.equal(replayed, 1);
+        assert.equal(getSpoolStatus().pending_count, 0);
     });
 
     it('computeDrillingMechanics computes ROP, Teale MSE, hydraulic status, and ILT cost', () => {
@@ -390,6 +430,12 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(hourlyRes.status, 200);
         const hourlyBody = await hourlyRes.json();
         assert.ok(Array.isArray(hourlyBody.buckets));
+
+        const fleetRes = await fetch(`${baseUrl}/api/fleet/leaderboard`);
+        assert.equal(fleetRes.status, 200);
+        const fleetBody = await fleetRes.json();
+        assert.ok(Array.isArray(fleetBody.rigs));
+        assert.equal(typeof readyBody.spool?.pending_count, 'number');
     });
 
     it('requireEdgeApiKey enforces X-Edge-Key when EDGE_API_KEY is configured', async () => {

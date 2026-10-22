@@ -9,22 +9,30 @@ function getRecentAlerts(limit = 20) {
 }
 
 async function dispatchIltAlert(decision) {
-    if (!decision || !decision.is_ilt) return null;
+    if (!decision) return null;
+
+    const isWellControl = Boolean(decision.well_control?.is_well_control_event) ||
+        decision.hydraulic_status === 'kick_warning' ||
+        decision.hydraulic_status === 'lost_circulation';
 
     const minSeconds = Number(process.env.ALERT_MIN_ILT_SECONDS) || 60;
     const duration = Number(decision.ilt_duration_seconds) || 0;
-    if (duration < minSeconds) return null;
+    if (!isWellControl && (!decision.is_ilt || duration < minSeconds)) return null;
 
     const alertEvent = {
-        event: 'ilt_detected',
-        severity: duration >= 180 ? 'critical' : 'warning',
+        event: isWellControl ? 'well_control_incident' : 'ilt_detected',
+        severity: isWellControl || duration >= 180 ? 'critical' : 'warning',
         rig_id: decision.rig_id || 'unknown',
         well_id: decision.well_id || 'unknown',
         declared_op: decision.declared_op || 'unknown',
         actual_state: decision.actual_state || 'unknown',
+        hydraulic_status: decision.hydraulic_status || 'normal',
         ilt_duration_seconds: duration,
+        ilt_cost_usd: Number(decision.ilt_cost_usd) || 0,
         confidence_score: decision.confidence_score,
-        justification: decision.justification,
+        justification: decision.well_control?.diagnostic_summary && isWellControl
+            ? `${decision.justification} | Well Control: ${decision.well_control.diagnostic_summary}`
+            : decision.justification,
         timestamp: decision.timestamp || new Date().toISOString(),
         webhook_dispatched: false
     };

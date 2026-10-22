@@ -23,7 +23,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
       "id": 1,
       "options": {
         "colorMode": "value",
@@ -57,7 +57,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
       "id": 2,
       "options": {
         "colorMode": "value",
@@ -92,7 +92,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
       "id": 3,
       "options": {
         "colorMode": "value",
@@ -128,7 +128,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
       "id": 4,
       "options": {
         "colorMode": "value",
@@ -143,6 +143,77 @@
       "targets": [
         {
           "expr": "sum(witsml_ilt_duration_seconds_total) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "red", "value": 250 }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Cumulative ILT Cost ($ USD)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(witsml_ilt_cost_usd_total) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Well Control / Hydraulic Alerts",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(witsml_well_control_events_total) or vector(0)",
           "refId": "A"
         }
       ]
@@ -314,7 +385,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT timestamp, rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification FROM ai_decisions ORDER BY timestamp DESC LIMIT 50;",
+          "rawSql": "SELECT timestamp, rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, ilt_cost_usd, rop_fphr, mse_psi, hydraulic_status, confidence_score, justification FROM ai_decisions ORDER BY timestamp DESC LIMIT 50;",
           "refId": "A"
         }
       ]
@@ -350,6 +421,70 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "id": 13,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "title": "Drilling Mechanics: ROP (ft/hr) & Teale MSE (ksi)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "witsml_drilling_rop_fphr",
+          "legendFormat": "ROP ft/hr ({{rig_id}})",
+          "refId": "A"
+        },
+        {
+          "expr": "witsml_drilling_mse_psi / 1000",
+          "legendFormat": "MSE ksi ({{rig_id}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "id": 14,
+      "options": {
+        "showHeader": true
+      },
+      "title": "Multi-Rig Fleet Efficiency & Well Control Leaderboard",
+      "type": "table",
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(rig_id, 'Rig-412') AS rig_id, MAX(COALESCE(well_id, 'WL-9924')) AS well_id, COUNT(*)::int AS decisions, COUNT(*) FILTER (WHERE is_ilt = true)::int AS ilt_events, ROUND((COUNT(*) FILTER (WHERE is_ilt = true)::numeric / GREATEST(COUNT(*), 1)) * 100, 1) AS ilt_rate_pct, COALESCE(ROUND(SUM(ilt_cost_usd) FILTER (WHERE is_ilt = true), 2), 0) AS ilt_cost_usd, COALESCE(ROUND(AVG(rop_fphr) FILTER (WHERE rop_fphr > 0), 2), 0) AS avg_rop_fphr, COALESCE(ROUND(AVG(mse_psi) FILTER (WHERE mse_psi > 0), 0), 0) AS avg_mse_psi FROM ai_decisions GROUP BY COALESCE(rig_id, 'Rig-412') ORDER BY ilt_rate_pct ASC;",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "10s",
@@ -361,5 +496,5 @@
   "timezone": "browser",
   "title": "WITSML Edge AI & Rig Telemetry Overview",
   "uid": "witsml-edge-overview",
-  "version": 3
+  "version": 4
 }

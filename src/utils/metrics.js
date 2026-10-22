@@ -84,6 +84,19 @@ const alertWebhooksCounter = new client.Counter({
     registers: [register]
 });
 
+const wellControlEventsCounter = new client.Counter({
+    name: 'witsml_well_control_events_total',
+    help: 'Total number of Well Control or Hydraulic anomaly events detected (kick_warning, lost_circulation, packoff_risk, washout_risk)',
+    labelNames: ['rig_id', 'well_id', 'event_type', 'severity'],
+    registers: [register]
+});
+
+const edgeSpoolPendingGauge = new client.Gauge({
+    name: 'witsml_edge_spool_pending',
+    help: 'Current number of telemetry batches or AI decisions buffered in the local edge store-and-forward disk spool',
+    registers: [register]
+});
+
 module.exports = {
     register,
     telemetryIngestionCounter,
@@ -96,5 +109,7 @@ module.exports = {
     aiQueueDepthGauge,
     drillingRopGauge,
     drillingMseGauge,
-    alertWebhooksCounter
+    alertWebhooksCounter,
+    wellControlEventsCounter,
+    edgeSpoolPendingGauge
 };

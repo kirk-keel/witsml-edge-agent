@@ -1,4 +1,5 @@
 const { Pool } = require("pg");
+const { enqueueSpoolRecord, flushSpool, getSpoolStatus } = require("../utils/spooler");
 
 const pool = new Pool({
   host: process.env.DB_HOST || "timescaledb",
@@ -45,47 +46,68 @@ async function ensureDecisionColumns() {
   }
 }
 
+async function insertBatchDirect({ rigId, wellId, payload }) {
+  await pool.query(
+    "INSERT INTO telemetry_batches (rig_id, well_id, payload) VALUES ($1, $2, $3)",
+    [rigId, wellId, JSON.stringify(payload)]
+  );
+}
+
+async function insertDecisionDirect({ decision, metadata = {} }) {
+  await ensureDecisionColumns();
+  const rigId = metadata.rig_id || decision.rig_id || null;
+  const wellId = metadata.well_id || decision.well_id || null;
+  const declaredOp = metadata.active_operation || decision.declared_op || null;
+
+  await pool.query(
+    `INSERT INTO ai_decisions
+      (rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification, rop_fphr, mse_psi, hydraulic_status, ilt_cost_usd)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [
+      rigId,
+      wellId,
+      declaredOp,
+      decision.actual_state,
+      decision.is_ilt,
+      Math.round(Number(decision.ilt_duration_seconds) || 0),
+      Number(decision.confidence_score) || 0,
+      decision.justification,
+      Number(decision.rop_fphr) || 0,
+      Number(decision.mse_psi) || 0,
+      decision.hydraulic_status || 'normal',
+      Number(decision.ilt_cost_usd) || 0
+    ]
+  );
+}
+
+async function replaySpoolIfNeeded() {
+  if (getSpoolStatus().pending_count > 0) {
+    await flushSpool({
+      onBatch: insertBatchDirect,
+      onDecision: insertDecisionDirect
+    });
+  }
+}
+
 async function saveTelemetryBatch(rigId, wellId, payload) {
   try {
-    await pool.query(
-      "INSERT INTO telemetry_batches (rig_id, well_id, payload) VALUES ($1, $2, $3)",
-      [rigId, wellId, JSON.stringify(payload)]
-    );
+    await insertBatchDirect({ rigId, wellId, payload });
     console.log("[TimescaleDB] Saved telemetry batch for " + rigId);
+    replaySpoolIfNeeded().catch(() => {});
   } catch (err) {
-    console.error("[TimescaleDB Error] Saving batch:", err.message);
+    console.error("[TimescaleDB Error] Saving batch (spooling to disk):", err.message);
+    enqueueSpoolRecord('batch', { rigId, wellId, payload });
   }
 }
 
 async function saveAiDecision(decision, metadata = {}) {
   try {
-    await ensureDecisionColumns();
-    const rigId = metadata.rig_id || decision.rig_id || null;
-    const wellId = metadata.well_id || decision.well_id || null;
-    const declaredOp = metadata.active_operation || decision.declared_op || null;
-
-    await pool.query(
-      `INSERT INTO ai_decisions
-        (rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification, rop_fphr, mse_psi, hydraulic_status, ilt_cost_usd)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [
-        rigId,
-        wellId,
-        declaredOp,
-        decision.actual_state,
-        decision.is_ilt,
-        Math.round(Number(decision.ilt_duration_seconds) || 0),
-        Number(decision.confidence_score) || 0,
-        decision.justification,
-        Number(decision.rop_fphr) || 0,
-        Number(decision.mse_psi) || 0,
-        decision.hydraulic_status || 'normal',
-        Number(decision.ilt_cost_usd) || 0
-      ]
-    );
+    await insertDecisionDirect({ decision, metadata });
     console.log("[TimescaleDB] Saved AI decision: " + decision.actual_state);
+    replaySpoolIfNeeded().catch(() => {});
   } catch (err) {
-    console.error("[TimescaleDB Error] Saving AI decision:", err.message);
+    console.error("[TimescaleDB Error] Saving AI decision (spooling to disk):", err.message);
+    enqueueSpoolRecord('decision', { decision, metadata });
   }
 }
 
@@ -274,6 +296,33 @@ async function getTelemetryStats() {
   }
 }
 
+async function getFleetLeaderboard() {
+  try {
+    await ensureDecisionColumns();
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(rig_id, 'Rig-412') AS rig_id,
+        MAX(COALESCE(well_id, 'WL-9924')) AS well_id,
+        COUNT(*)::int AS total_decisions,
+        COUNT(*) FILTER (WHERE is_ilt = true)::int AS ilt_events,
+        ROUND((COUNT(*) FILTER (WHERE is_ilt = true)::numeric / GREATEST(COUNT(*), 1)) * 100, 1)::float AS ilt_rate_pct,
+        COALESCE(SUM(ilt_duration_seconds) FILTER (WHERE is_ilt = true), 0)::int AS total_ilt_seconds,
+        COALESCE(ROUND(SUM(ilt_cost_usd) FILTER (WHERE is_ilt = true), 2), 0)::float AS total_ilt_cost_usd,
+        COALESCE(ROUND(AVG(rop_fphr) FILTER (WHERE rop_fphr > 0), 2), 0)::float AS avg_rop_fphr,
+        COALESCE(ROUND(AVG(mse_psi) FILTER (WHERE mse_psi > 0), 0), 0)::float AS avg_mse_psi,
+        COUNT(*) FILTER (WHERE hydraulic_status IN ('kick_warning', 'lost_circulation', 'packoff_risk', 'washout_risk'))::int AS well_control_incidents,
+        MAX(timestamp) AS last_active
+      FROM ai_decisions
+      GROUP BY COALESCE(rig_id, 'Rig-412')
+      ORDER BY ilt_rate_pct ASC, avg_rop_fphr DESC
+    `);
+    return rows;
+  } catch (err) {
+    console.error("[TimescaleDB Error] Fetching fleet leaderboard:", err.message);
+    return [];
+  }
+}
+
 module.exports = {
   pool,
   saveTelemetryBatch,
@@ -283,6 +332,7 @@ module.exports = {
   getRecentAiDecisions,
   getRecentTelemetryBatches,
   getHourlyIltSummary,
+  getFleetLeaderboard,
   checkDbHealth,
   getTelemetryStats
 };

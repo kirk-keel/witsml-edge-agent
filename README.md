@@ -74,10 +74,10 @@ node stream-simulator.js --continuous
 | Method | Path | Description |
 | :--- | :--- | :--- |
 | `GET` | `/health` | Liveness probe (`200 OK`) |
-| `GET` | `/ready` | Deep readiness probe checking live TimescaleDB latency, Ollama (`qwen2.5:1.5b`) reachability, and queue depth |
-| `GET` | `/metrics` | Prometheus metrics (`witsml_telemetry_batches_total`, `witsml_telemetry_points_total`, `witsml_ai_inference_duration_seconds`, `witsml_ilt_detections_total`, `witsml_ilt_duration_seconds_total`, `witsml_ilt_cost_usd_total`, `witsml_drilling_rop_fphr`, `witsml_drilling_mse_psi`, `witsml_ai_decisions_total`, `witsml_ai_queue_depth`, `witsml_alert_events_total`) |
-| `POST` | `/api/v1/telemetry` | Schema-validated WITSML JSON window ingestion (`202 Accepted`; honors optional `EDGE_API_KEY`) |
-| `POST` | `/api/v1/witsml/xml` | Native WITSML v1.4.1.1 / v2.0 `<log>` XML ingestion (`TIME`, `DEPT`, `DBTM`, `BPOS`, `HKLD`, `WOB`, `SPPA`, `MFIA`, `RPM`) |
+| `GET` | `/ready` | Deep readiness probe checking live TimescaleDB latency, Ollama (`qwen2.5:1.5b`) reachability, queue depth, and edge disk spool status |
+| `GET` | `/metrics` | Prometheus metrics (`witsml_telemetry_batches_total`, `witsml_telemetry_points_total`, `witsml_ai_inference_duration_seconds`, `witsml_ilt_detections_total`, `witsml_ilt_duration_seconds_total`, `witsml_ilt_cost_usd_total`, `witsml_drilling_rop_fphr`, `witsml_drilling_mse_psi`, `witsml_well_control_events_total`, `witsml_edge_spool_pending`, `witsml_ai_decisions_total`, `witsml_ai_queue_depth`, `witsml_alert_events_total`) |
+| `POST` | `/api/v1/telemetry` | Schema-validated WITSML JSON window ingestion (`202 Accepted`; supports optional well control fields `flow_out_gpm`, `pit_gain_bbl`, `gas_units`, `ecd_ppg` and `EDGE_API_KEY`) |
+| `POST` | `/api/v1/witsml/xml` | Native WITSML v1.4.1.1 / v2.0 `<log>` XML ingestion (`TIME`, `DEPT`, `DBTM`, `BPOS`, `HKLD`, `WOB`, `SPPA`, `MFIA`, `MFOA`, `TVCA`, `GASA`, `ECDA`, `RPM`) |
 | `POST` | `/api/witsml` | Legacy alias forwarded to the telemetry ingestion pipeline |
 | `GET` | `/api/sops` | Retrieve active SOP thresholds (`?rig_id=Rig-412` for per-rig profile or global default) |
 | `GET` | `/api/sops/profiles` | Retrieve default and per-rig SOP profiles stored in memory and TimescaleDB (`rig_sops`) |
@@ -85,9 +85,10 @@ node stream-simulator.js --continuous
 | `GET` | `/api/decisions` | Retrieve recent AI rig state decisions from TimescaleDB (`?limit=25&rig_id=Rig-412&is_ilt=true`) |
 | `GET` | `/api/decisions/export` | Download shift ILT / Daily Drilling Report (DDR) in CSV (`?format=csv`) or JSON (`?format=json`) including `ilt_cost_usd`, `rop_fphr`, `mse_psi`, and `hydraulic_status` |
 | `GET` | `/api/batches` | Retrieve recent raw WITSML telemetry windows from TimescaleDB (`?limit=10&rig_id=Rig-412`) |
-| `GET` | `/api/alerts` | Retrieve recent ILT alert events triggered by the alert dispatcher |
-| `GET` | `/api/stats` | Aggregated KPI summary (`total_batches`, `total_decisions`, `ilt_count`, `total_ilt_seconds`, `total_ilt_cost_usd`, `avg_rop_fphr`, `avg_mse_psi`, `avg_confidence`, `queue`) |
+| `GET` | `/api/alerts` | Retrieve recent ILT and Well Control alert events triggered by the alert dispatcher |
+| `GET` | `/api/stats` | Aggregated KPI summary (`total_batches`, `total_decisions`, `ilt_count`, `total_ilt_seconds`, `total_ilt_cost_usd`, `avg_rop_fphr`, `avg_mse_psi`, `avg_confidence`, `queue`, `spool`) |
 | `GET` | `/api/stats/hourly` | TimescaleDB `time_bucket('1 hour', timestamp)` rollup of ILT events and lost time (`?hours=24`) |
+| `GET` | `/api/fleet/leaderboard` | Multi-rig efficiency and well control benchmark leaderboard ranked by ILT rate and ROP |
 | `GET` | `/api/stream` | Server-Sent Events (SSE) stream with 25s keep-alive heartbeats for live dashboard updates |
 
 ## Documentation

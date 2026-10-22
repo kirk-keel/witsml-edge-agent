@@ -33,6 +33,18 @@ const MNEMONIC_MAP = Object.freeze({
     FLOWIN: 'flow_in_gpm',
     TFLO: 'flow_in_gpm',
     FLOW_IN_GPM: 'flow_in_gpm',
+    MFOA: 'flow_out_gpm',
+    FLOWOUT: 'flow_out_gpm',
+    FLOW_OUT_GPM: 'flow_out_gpm',
+    TVCA: 'pit_gain_bbl',
+    PITGAIN: 'pit_gain_bbl',
+    PIT_GAIN_BBL: 'pit_gain_bbl',
+    GASA: 'gas_units',
+    GAS: 'gas_units',
+    GAS_UNITS: 'gas_units',
+    ECDA: 'ecd_ppg',
+    ECD: 'ecd_ppg',
+    ECD_PPG: 'ecd_ppg',
     RPM: 'rpm',
     SRPM: 'rpm'
 });

@@ -9,6 +9,7 @@ const { z } = require("zod");
 const { logAiDecision } = require('../utils/logger');
 const { dispatchIltAlert } = require('../utils/alerter');
 const { computeDrillingMechanics } = require('../utils/mechanics');
+const { evaluateWellControl } = require('../utils/wellcontrol');
 const {
     aiInferenceLatencyHistogram,
     iltDetectionCounter,
@@ -17,7 +18,8 @@ const {
     aiDecisionsCounter,
     aiQueueDepthGauge,
     drillingRopGauge,
-    drillingMseGauge
+    drillingMseGauge,
+    wellControlEventsCounter
 } = require('../utils/metrics');
 
 const telemetryEvents = new EventEmitter();
@@ -354,9 +356,22 @@ async function processSingleBatch(data) {
         const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
         const justification = sanitizeJustification(rawResult.justification, preCheck);
         const mechanics = computeDrillingMechanics(data, sopConfig, ilt_duration_seconds);
+        const wellControl = evaluateWellControl(data);
+        const hydraulic_status = wellControl.well_control_status !== 'normal'
+            ? wellControl.well_control_status
+            : mechanics.hydraulic_status;
 
         drillingRopGauge.set({ rig_id, well_id }, mechanics.rop_fphr);
         drillingMseGauge.set({ rig_id, well_id }, mechanics.mse_psi);
+
+        if (hydraulic_status !== 'normal') {
+            wellControlEventsCounter.inc({
+                rig_id,
+                well_id,
+                event_type: hydraulic_status,
+                severity: wellControl.severity
+            });
+        }
 
         aiDecisionsCounter.inc({
             rig_id,
@@ -384,7 +399,8 @@ async function processSingleBatch(data) {
             rop_fphr: mechanics.rop_fphr,
             mse_psi: mechanics.mse_psi,
             mse_ksi: mechanics.mse_ksi,
-            hydraulic_status: mechanics.hydraulic_status,
+            hydraulic_status,
+            well_control: wellControl,
             ilt_cost_usd: mechanics.ilt_cost_usd,
             rig_id,
             well_id,
@@ -407,9 +423,22 @@ async function processSingleBatch(data) {
         const is_ilt = preCheck.is_ilt;
         const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
         const mechanics = computeDrillingMechanics(data, sopConfig, ilt_duration_seconds);
+        const wellControl = evaluateWellControl(data);
+        const hydraulic_status = wellControl.well_control_status !== 'normal'
+            ? wellControl.well_control_status
+            : mechanics.hydraulic_status;
 
         drillingRopGauge.set({ rig_id, well_id }, mechanics.rop_fphr);
         drillingMseGauge.set({ rig_id, well_id }, mechanics.mse_psi);
+
+        if (hydraulic_status !== 'normal') {
+            wellControlEventsCounter.inc({
+                rig_id,
+                well_id,
+                event_type: hydraulic_status,
+                severity: wellControl.severity
+            });
+        }
 
         aiDecisionsCounter.inc({
             rig_id,
@@ -437,7 +466,8 @@ async function processSingleBatch(data) {
             rop_fphr: mechanics.rop_fphr,
             mse_psi: mechanics.mse_psi,
             mse_ksi: mechanics.mse_ksi,
-            hydraulic_status: mechanics.hydraulic_status,
+            hydraulic_status,
+            well_control: wellControl,
             ilt_cost_usd: mechanics.ilt_cost_usd,
             rig_id,
             well_id,

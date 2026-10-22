@@ -26,7 +26,11 @@ const telemetrySchema = z.object({
         wob_klbs: z.number(),
         spp_psi: z.number(),
         flow_in_gpm: z.number(),
-        rpm: z.number()
+        rpm: z.number(),
+        flow_out_gpm: z.number().optional(),
+        pit_gain_bbl: z.number().optional(),
+        gas_units: z.number().optional(),
+        ecd_ppg: z.number().optional()
     })).min(1)
 });
 

@@ -45,6 +45,10 @@
         #live-feed { height: 420px; overflow-y: auto; background: #000; padding: 15px; border-radius: 4px; border: 1px solid #334155; }
         .log-normal { color: #10b981; margin-bottom: 8px; }
         .log-ilt { color: #ef4444; font-weight: bold; margin-bottom: 8px; }
+        .fleet-panel { margin-top: 20px; }
+        table.fleet-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        table.fleet-table th, table.fleet-table td { padding: 8px 10px; border-bottom: 1px solid #334155; text-align: left; }
+        table.fleet-table th { color: #94a3b8; text-transform: uppercase; font-size: 11px; }
     </style>
 </head>
 <body>
@@ -58,6 +62,7 @@
             <button class="btn-action" onclick="simulateWindow('drilling')">+ Normal Drilling</button>
             <button class="btn-action btn-danger" onclick="simulateWindow('dysfunction')">+ Dysfunction ILT</button>
             <button class="btn-action btn-warn" onclick="simulateWindow('connection')">+ Connection ILT</button>
+            <button class="btn-action btn-danger" onclick="simulateWindow('kick')">+ Kick Warning</button>
             <button class="btn-action" onclick="simulateWitsmlXml()">+ WITSML XML</button>
             <a class="btn-action btn-export" href="/api/decisions/export?format=csv">Export DDR CSV</a>
             <a class="btn-action" id="grafana-link" target="_blank" rel="noopener">Open Grafana (:3001)</a>
@@ -136,6 +141,31 @@
         </div>
     </div>
 
+    <div class="panel fleet-panel">
+        <div class="panel-header">
+            <h3>Multi-Rig Fleet Efficiency & Well Control Leaderboard</h3>
+        </div>
+        <table class="fleet-table">
+            <thead>
+                <tr>
+                    <th>Rig ID</th>
+                    <th>Well ID</th>
+                    <th>Decisions</th>
+                    <th>ILT Events</th>
+                    <th>ILT Rate</th>
+                    <th>Lost Time</th>
+                    <th>ILT Cost ($ USD)</th>
+                    <th>Avg ROP (ft/hr)</th>
+                    <th>Avg MSE (ksi)</th>
+                    <th>Well Control Alerts</th>
+                </tr>
+            </thead>
+            <tbody id="fleet-tbody">
+                <tr><td colspan="10">Loading fleet telemetry...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
     <script>
         let currentFilter = 'all';
 
@@ -211,6 +241,34 @@
                 })
                 .catch(() => {});
             refreshLatestBatch();
+            refreshFleet();
+        }
+
+        function refreshFleet() {
+            fetch('/api/fleet/leaderboard')
+                .then(res => res.json())
+                .then(({ rigs }) => {
+                    const tbody = document.getElementById('fleet-tbody');
+                    if (!Array.isArray(rigs) || rigs.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="10">No rig decisions recorded yet.</td></tr>';
+                        return;
+                    }
+                    tbody.innerHTML = rigs.map(r => `
+                        <tr>
+                            <td><strong>${r.rig_id}</strong></td>
+                            <td>${r.well_id}</td>
+                            <td>${r.total_decisions}</td>
+                            <td style="color:${r.ilt_events > 0 ? '#ef4444' : '#10b981'}">${r.ilt_events}</td>
+                            <td>${r.ilt_rate_pct}%</td>
+                            <td>${r.total_ilt_seconds}s</td>
+                            <td style="color:#f59e0b">$${Number(r.total_ilt_cost_usd || 0).toFixed(2)}</td>
+                            <td>${r.avg_rop_fphr} ft/hr</td>
+                            <td>${((r.avg_mse_psi || 0) / 1000).toFixed(1)} ksi</td>
+                            <td style="color:${r.well_control_incidents > 0 ? '#ef4444' : '#10b981'}">${r.well_control_incidents}</td>
+                        </tr>
+                    `).join('');
+                })
+                .catch(() => {});
         }
 
         function saveSOP() {
@@ -264,12 +322,17 @@
                     { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 },
                     { depth: 10060, wob: 0, rpm: 0, flow: 0, spp: 0, block_pos: 10 }
                 ];
+            } else if (mode === 'kick') {
+                activeOp = 'drilling';
+                points = [
+                    { depth: 10075, wob: 18, rpm: 120, flow: 400, flow_out: 465, pit_gain: 8.5, gas: 650, spp: 2680, block_pos: 50 }
+                ];
             }
 
             const payload = {
                 metadata: {
                     well_id: 'WL-9924',
-                    rig_id: 'Rig-412',
+                    rig_id: document.getElementById('sop-rig').value || 'Rig-412',
                     window_start: new Date(start).toISOString(),
                     window_end: new Date(start + 5 * 60000).toISOString(),
                     interval_seconds: 10,
@@ -284,7 +347,10 @@
                     wob_klbs: pt.wob,
                     spp_psi: pt.spp,
                     flow_in_gpm: pt.flow,
-                    rpm: pt.rpm
+                    rpm: pt.rpm,
+                    ...(pt.flow_out !== undefined ? { flow_out_gpm: pt.flow_out } : {}),
+                    ...(pt.pit_gain !== undefined ? { pit_gain_bbl: pt.pit_gain } : {}),
+                    ...(pt.gas !== undefined ? { gas_units: pt.gas } : {})
                 }))
             };
 
@@ -302,13 +368,15 @@
                 feed.innerHTML = '';
             }
             const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-            const cssClass = data.is_ilt ? 'log-ilt' : 'log-normal';
+            const isWellAlert = data.hydraulic_status && data.hydraulic_status !== 'normal';
+            const cssClass = (data.is_ilt || isWellAlert) ? 'log-ilt' : 'log-normal';
             const costStr = data.is_ilt && data.ilt_cost_usd ? ` | $${Number(data.ilt_cost_usd).toFixed(2)}` : '';
             const mechStr = data.rop_fphr ? ` [ROP:${data.rop_fphr}ft/hr MSE:${((data.mse_psi || 0) / 1000).toFixed(1)}ksi]` : '';
+            const wcStr = isWellAlert ? ` [WELL CONTROL: ${String(data.hydraulic_status).toUpperCase()}]` : '';
             const status = data.is_ilt ? `ILT DETECTED (${data.ilt_duration_seconds || 0}s${costStr})` : 'NORMAL';
             const rigTag = data.rig_id ? `[${data.rig_id}] ` : '';
 
-            feed.innerHTML += `<div class="${cssClass}">[${time}] ${rigTag}[${status}]${mechStr} ${data.justification}</div>`;
+            feed.innerHTML += `<div class="${cssClass}">[${time}] ${rigTag}[${status}]${wcStr}${mechStr} ${data.justification}</div>`;
             feed.scrollTop = feed.scrollHeight;
         }
 

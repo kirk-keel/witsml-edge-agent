@@ -15,10 +15,12 @@ const {
     getRecentAiDecisions,
     getRecentTelemetryBatches,
     getHourlyIltSummary,
+    getFleetLeaderboard,
     checkDbHealth,
     getTelemetryStats
 } = require('./services/db');
 const { getRecentAlerts } = require('./utils/alerter');
+const { getSpoolStatus } = require('./utils/spooler');
 const { requireEdgeApiKey } = require('./utils/auth');
 const { router: telemetryRouter } = require('./routes/telemetry');
 const { register } = require('./utils/metrics');
@@ -41,7 +43,8 @@ app.get('/ready', async (req, res) => {
         status: timescaledb.ok && ollama.ok ? 'ready' : 'degraded',
         timescaledb,
         ollama,
-        queue: getQueueStatus()
+        queue: getQueueStatus(),
+        spool: getSpoolStatus()
     });
 });
 
@@ -151,12 +154,17 @@ app.get('/api/alerts', (req, res) => {
 
 app.get('/api/stats', async (req, res) => {
     const stats = await getTelemetryStats();
-    res.json({ ...stats, queue: getQueueStatus() });
+    res.json({ ...stats, queue: getQueueStatus(), spool: getSpoolStatus() });
 });
 
 app.get('/api/stats/hourly', async (req, res) => {
     const buckets = await getHourlyIltSummary(req.query.hours);
     res.json({ buckets });
+});
+
+app.get('/api/fleet/leaderboard', async (req, res) => {
+    const rigs = await getFleetLeaderboard();
+    res.json({ rigs });
 });
 
 // --- SERVER-SENT EVENTS (SSE) STREAM via EventEmitter ---
