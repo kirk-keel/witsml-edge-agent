@@ -146,7 +146,7 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(circulatingLoss.actual_state, 'circulation_loss');
     });
 
-    it('GET and POST /api/sops manage runtime SOP thresholds', async () => {
+    it('GET and POST /api/sops manage global and per-rig runtime SOP thresholds', async () => {
         const getRes = await fetch(`${baseUrl}/api/sops`);
         assert.equal(getRes.status, 200);
         const initialSops = await getRes.json();
@@ -166,6 +166,53 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
             min_flow: 250,
             max_conn_time: 210
         });
+
+        const rigSopRes = await fetch(`${baseUrl}/api/sops`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rig_id: 'Rig-501', min_wob: 8, min_rpm: 30, min_flow: 180, max_conn_time: 150 })
+        });
+        assert.equal(rigSopRes.status, 200);
+
+        const getRigSop = await (await fetch(`${baseUrl}/api/sops?rig_id=Rig-501`)).json();
+        assert.equal(getRigSop.min_wob, 8);
+        assert.equal(getRigSop.max_conn_time, 150);
+
+        const profilesRes = await (await fetch(`${baseUrl}/api/sops/profiles`)).json();
+        assert.equal(profilesRes.rigs['Rig-501'].min_wob, 8);
+    });
+
+    it('POST /api/v1/witsml/xml parses native WITSML XML into canonical telemetry', async () => {
+        const now = new Date().toISOString();
+        const xmlPayload = `<logs xmlns="http://www.witsml.org/schemas/1series" version="1.4.1.1">
+  <log uidWell="WL-9924" uidWellbore="Rig-412">
+    <nameWell>WL-9924</nameWell>
+    <nameWellbore>Rig-412</nameWellbore>
+    <activeOperation>drilling</activeOperation>
+    <logData>
+      <mnemonicList>TIME,DEPT,DBTM,BPOS,HKLD,WOB,SPPA,MFIA,RPM</mnemonicList>
+      <data>${now},10120,10120,55,242,19.5,2890,415,128</data>
+    </logData>
+  </log>
+</logs>`;
+        const res = await fetch(`${baseUrl}/api/v1/witsml/xml`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/xml' },
+            body: xmlPayload
+        });
+        assert.equal(res.status, 202);
+        const body = await res.json();
+        assert.equal(body.status, 'accepted');
+        assert.equal(body.format, 'witsml_xml');
+        assert.equal(body.rig_id, 'Rig-412');
+        assert.equal(body.points_ingested, 1);
+
+        const badRes = await fetch(`${baseUrl}/api/v1/witsml/xml`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/xml' },
+            body: 'not-xml'
+        });
+        assert.equal(badRes.status, 400);
     });
 
     it('POST /api/v1/telemetry rejects malformed payload with 400 and increments validation_error metric', async () => {
@@ -240,11 +287,11 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         const metricsText = await (await fetch(`${baseUrl}/metrics`)).text();
         assert.match(
             metricsText,
-            /witsml_telemetry_batches_total\{rig_id="Rig-412",well_id="WL-9924",active_operation="drilling",status="accepted"\} 1/
+            /witsml_telemetry_batches_total\{rig_id="Rig-412",well_id="WL-9924",active_operation="drilling",status="accepted"\} 2/
         );
         assert.match(
             metricsText,
-            /witsml_telemetry_points_total\{rig_id="Rig-412",well_id="WL-9924"\} 2/
+            /witsml_telemetry_points_total\{rig_id="Rig-412",well_id="WL-9924"\} 3/
         );
     });
 
@@ -272,5 +319,21 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.ok(['ready', 'degraded'].includes(readyBody.status));
         assert.equal(typeof readyBody.timescaledb?.ok, 'boolean');
         assert.equal(typeof readyBody.ollama?.ok, 'boolean');
+
+        const csvRes = await fetch(`${baseUrl}/api/decisions/export?format=csv`);
+        assert.equal(csvRes.status, 200);
+        assert.match(csvRes.headers.get('content-type'), /text\/csv/);
+        const csvText = await csvRes.text();
+        assert.match(csvText, /^id,timestamp,rig_id,well_id,declared_op,actual_state,is_ilt,ilt_duration_seconds,confidence_score,justification/);
+
+        const alertsRes = await fetch(`${baseUrl}/api/alerts`);
+        assert.equal(alertsRes.status, 200);
+        const alertsBody = await alertsRes.json();
+        assert.ok(Array.isArray(alertsBody.alerts));
+
+        const hourlyRes = await fetch(`${baseUrl}/api/stats/hourly?hours=12`);
+        assert.equal(hourlyRes.status, 200);
+        const hourlyBody = await hourlyRes.json();
+        assert.ok(Array.isArray(hourlyBody.buckets));
     });
 });

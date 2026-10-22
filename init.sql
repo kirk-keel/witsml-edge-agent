@@ -26,6 +26,15 @@ ALTER TABLE ai_decisions
     ADD COLUMN IF NOT EXISTS well_id VARCHAR(50),
     ADD COLUMN IF NOT EXISTS declared_op VARCHAR(50);
 
+CREATE TABLE IF NOT EXISTS rig_sops (
+    rig_id VARCHAR(50) PRIMARY KEY,
+    min_wob NUMERIC NOT NULL DEFAULT 5,
+    min_rpm NUMERIC NOT NULL DEFAULT 20,
+    min_flow NUMERIC NOT NULL DEFAULT 100,
+    max_conn_time INT NOT NULL DEFAULT 180,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_telemetry_batches_rig_time ON telemetry_batches (rig_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_decisions_rig_time ON ai_decisions (rig_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_decisions_is_ilt ON ai_decisions (is_ilt, timestamp DESC);

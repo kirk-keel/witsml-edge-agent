@@ -300,7 +300,7 @@
           }
         ]
       },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 20 },
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 20 },
       "id": 7,
       "options": {
         "showHeader": true,
@@ -318,6 +318,38 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 20 },
+      "id": 10,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "title": "Hourly ILT Lost Time Rollup (TimescaleDB time_bucket)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time_bucket('1 hour', timestamp) AS time, COALESCE(rig_id, 'Rig-412') AS metric, COALESCE(SUM(ilt_duration_seconds) FILTER (WHERE is_ilt = true), 0)::numeric AS value FROM ai_decisions WHERE $__timeFilter(timestamp) GROUP BY 1, 2 ORDER BY 1;",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "10s",
@@ -329,5 +361,5 @@
   "timezone": "browser",
   "title": "WITSML Edge AI & Rig Telemetry Overview",
   "uid": "witsml-edge-overview",
-  "version": 2
+  "version": 3
 }

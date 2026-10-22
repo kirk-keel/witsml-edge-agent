@@ -6,8 +6,8 @@ The **WITSML Edge Agent** ingests high-frequency drilling rig sensor windows (WO
 
 ## Data Flow
 
-1. **Telemetry Ingestion (`POST /api/v1/telemetry` & `POST /api/witsml`):**
-   - Incoming JSON payloads are validated synchronously against `telemetrySchema` (Zod) in `src/routes/telemetry.js`.
+1. **Telemetry Ingestion (`POST /api/v1/telemetry`, `POST /api/v1/witsml/xml`, & `POST /api/witsml`):**
+   - Incoming JSON payloads or WITSML v1.4.1.1 / v2.0 `<log>` XML payloads (`parseWitsmlXmlToTelemetry` in `src/utils/witsml-xml.js`) are validated synchronously against `telemetrySchema` (Zod) in `src/routes/telemetry.js`.
    - Invalid payloads return `400 Bad Request` immediately and increment `witsml_telemetry_batches_total{status="validation_error"}`.
    - Valid payloads increment `witsml_telemetry_batches_total{status="accepted"}` and `witsml_telemetry_points_total`, persist the raw JSONB window to the `telemetry_batches` hypertable in TimescaleDB, enqueue asynchronous AI analysis (`analyzeRigStateAsync`), and return `202 Accepted` so rig telemetry producers are never blocked by LLM inference latency.
 
@@ -22,11 +22,11 @@ The **WITSML Edge Agent** ingests high-frequency drilling rig sensor windows (WO
    - Persists each enriched assessment (`rig_id`, `well_id`, `declared_op`, `actual_state`, `is_ilt`, `ilt_duration_seconds`, `confidence_score`, `justification`) to the `ai_decisions` hypertable in TimescaleDB.
    - Appends an immutable audit entry to `logs/llm-audit.jsonl`.
    - Broadcasts decisions over Server-Sent Events (`GET /api/stream`, with 25-second `: heartbeat` keep-alives) to the live web console (`public/index.html`).
-   - Exposes `GET /api/decisions` (with `?rig_id=`, `?well_id=`, `?is_ilt=` filters), `GET /api/batches`, `GET /api/stats`, and `GET /ready` (live TimescaleDB + Ollama health & latency probes).
+   - Exposes `GET /api/decisions` (with `?rig_id=`, `?well_id=`, `?is_ilt=` filters), `GET /api/decisions/export` (RFC-4180 CSV & JSON shift DDR export), `GET /api/sops/profiles` (per-rig SOP thresholds persisted in `rig_sops`), `GET /api/alerts` (outbound webhook + local ILT alert log via `src/utils/alerter.js`), `GET /api/batches`, `GET /api/stats`, `GET /api/stats/hourly` (TimescaleDB `time_bucket` rollup), and `GET /ready`.
 
 4. **Observability & Alerting (`Prometheus` + `Grafana`):**
    - Prometheus (`:9090`) scrapes `http://witsml-agent:3000/metrics` every 15 seconds and evaluates 4 alerting rules in `alert.rules.yml` (`RepeatedIltDetected`, `AiInferenceQueueBacklog`, `SlowEdgeAiInference`, `WitsmlEdgeAgentDown`).
-   - Grafana (`:3001`) connects to both `Prometheus` and `TimescaleDB` via declarative provisioning (`grafana/provisioning/`) and renders the 9-panel **WITSML Edge AI & Rig Telemetry Overview** dashboard (`witsml-overview.json`).
+   - Grafana (`:3001`) connects to both `Prometheus` and `TimescaleDB` via declarative provisioning (`grafana/provisioning/`) and renders the 10-panel **WITSML Edge AI & Rig Telemetry Overview** dashboard (`witsml-overview.json`).
 
 ## TimescaleDB Hypertables, Indexes & Retention (`init.sql`)
 

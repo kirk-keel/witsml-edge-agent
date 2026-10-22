@@ -56,6 +56,13 @@ const aiQueueDepthGauge = new client.Gauge({
     registers: [register]
 });
 
+const alertWebhooksCounter = new client.Counter({
+    name: 'witsml_alert_events_total',
+    help: 'Total number of ILT alert events triggered and dispatched',
+    labelNames: ['rig_id', 'severity', 'status'],
+    registers: [register]
+});
+
 module.exports = {
     register,
     telemetryIngestionCounter,
@@ -64,5 +71,6 @@ module.exports = {
     iltDetectionCounter,
     iltDurationSecondsCounter,
     aiDecisionsCounter,
-    aiQueueDepthGauge
+    aiQueueDepthGauge,
+    alertWebhooksCounter
 };

@@ -18,6 +18,14 @@ async function ensureDecisionColumns() {
         ADD COLUMN IF NOT EXISTS rig_id VARCHAR(50),
         ADD COLUMN IF NOT EXISTS well_id VARCHAR(50),
         ADD COLUMN IF NOT EXISTS declared_op VARCHAR(50);
+      CREATE TABLE IF NOT EXISTS rig_sops (
+        rig_id VARCHAR(50) PRIMARY KEY,
+        min_wob NUMERIC NOT NULL DEFAULT 5,
+        min_rpm NUMERIC NOT NULL DEFAULT 20,
+        min_flow NUMERIC NOT NULL DEFAULT 100,
+        max_conn_time INT NOT NULL DEFAULT 180,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
       CREATE INDEX IF NOT EXISTS idx_telemetry_batches_rig_time ON telemetry_batches (rig_id, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_ai_decisions_rig_time ON ai_decisions (rig_id, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_ai_decisions_is_ilt ON ai_decisions (is_ilt, timestamp DESC);
@@ -68,11 +76,44 @@ async function saveAiDecision(decision, metadata = {}) {
   }
 }
 
+async function upsertRigSop(rigId, sop) {
+  try {
+    await ensureDecisionColumns();
+    await pool.query(
+      `INSERT INTO rig_sops (rig_id, min_wob, min_rpm, min_flow, max_conn_time, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (rig_id) DO UPDATE SET
+         min_wob = EXCLUDED.min_wob,
+         min_rpm = EXCLUDED.min_rpm,
+         min_flow = EXCLUDED.min_flow,
+         max_conn_time = EXCLUDED.max_conn_time,
+         updated_at = NOW()`,
+      [rigId, sop.min_wob, sop.min_rpm, sop.min_flow, sop.max_conn_time]
+    );
+  } catch (err) {
+    console.warn("[TimescaleDB] Could not persist rig SOP:", err.message);
+  }
+}
+
+async function getAllRigSops() {
+  try {
+    await ensureDecisionColumns();
+    const { rows } = await pool.query(
+      `SELECT rig_id, min_wob::float AS min_wob, min_rpm::float AS min_rpm, min_flow::float AS min_flow, max_conn_time::int AS max_conn_time, updated_at
+       FROM rig_sops
+       ORDER BY rig_id ASC`
+    );
+    return rows;
+  } catch (err) {
+    return [];
+  }
+}
+
 async function getRecentAiDecisions(options = 25) {
   try {
     await ensureDecisionColumns();
     const opts = typeof options === 'object' && options !== null ? options : { limit: options };
-    const safeLimit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
+    const safeLimit = Math.min(Math.max(Number(opts.limit) || 25, 1), 500);
 
     const conditions = [];
     const values = [];
@@ -134,6 +175,31 @@ async function getRecentTelemetryBatches(options = {}) {
   }
 }
 
+async function getHourlyIltSummary(hours = 24) {
+  try {
+    await ensureDecisionColumns();
+    const safeHours = Math.min(Math.max(Number(hours) || 24, 1), 720);
+    const { rows } = await pool.query(
+      `SELECT
+         time_bucket('1 hour', timestamp) AS bucket,
+         COALESCE(rig_id, 'Rig-412') AS rig_id,
+         COUNT(*)::int AS total_decisions,
+         COUNT(*) FILTER (WHERE is_ilt = true)::int AS ilt_events,
+         COALESCE(SUM(ilt_duration_seconds) FILTER (WHERE is_ilt = true), 0)::int AS ilt_seconds,
+         COALESCE(ROUND(AVG(confidence_score), 2), 0)::float AS avg_confidence
+       FROM ai_decisions
+       WHERE timestamp >= NOW() - ($1 || ' hours')::interval
+       GROUP BY bucket, COALESCE(rig_id, 'Rig-412')
+       ORDER BY bucket DESC`,
+      [safeHours]
+    );
+    return rows;
+  } catch (err) {
+    console.error("[TimescaleDB Error] Fetching hourly ILT summary:", err.message);
+    return [];
+  }
+}
+
 async function checkDbHealth() {
   const start = Date.now();
   try {
@@ -184,8 +250,11 @@ module.exports = {
   pool,
   saveTelemetryBatch,
   saveAiDecision,
+  upsertRigSop,
+  getAllRigSops,
   getRecentAiDecisions,
   getRecentTelemetryBatches,
+  getHourlyIltSummary,
   checkDbHealth,
   getTelemetryStats
 };

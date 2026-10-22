@@ -1,4 +1,4 @@
-const { saveAiDecision } = require("./db");
+const { saveAiDecision, upsertRigSop } = require("./db");
 const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
@@ -7,6 +7,7 @@ const { PromptTemplate } = require("@langchain/core/prompts");
 const { StructuredOutputParser } = require("@langchain/core/output_parsers");
 const { z } = require("zod");
 const { logAiDecision } = require('../utils/logger');
+const { dispatchIltAlert } = require('../utils/alerter');
 const {
     aiInferenceLatencyHistogram,
     iltDetectionCounter,
@@ -27,6 +28,7 @@ const DEFAULT_SOP_CONFIG = Object.freeze({
 const configPath = path.join(__dirname, '../sop-config.json');
 
 let inMemorySopConfig = { ...DEFAULT_SOP_CONFIG };
+const rigSopProfiles = new Map();
 
 function loadInitialSopConfig() {
     try {
@@ -40,17 +42,40 @@ function loadInitialSopConfig() {
 }
 loadInitialSopConfig();
 
-function getSopConfig() {
+function getSopConfig(rigId) {
+    if (rigId && rigSopProfiles.has(rigId)) {
+        return { ...rigSopProfiles.get(rigId) };
+    }
     return { ...inMemorySopConfig };
 }
 
-function updateSopConfig(nextConfig) {
-    inMemorySopConfig = {
-        min_wob: Number(nextConfig?.min_wob ?? inMemorySopConfig.min_wob),
-        min_rpm: Number(nextConfig?.min_rpm ?? inMemorySopConfig.min_rpm),
-        min_flow: Number(nextConfig?.min_flow ?? inMemorySopConfig.min_flow),
-        max_conn_time: Number(nextConfig?.max_conn_time ?? inMemorySopConfig.max_conn_time)
+function getAllSopProfiles() {
+    return {
+        default: { ...inMemorySopConfig },
+        rigs: Object.fromEntries(rigSopProfiles.entries())
     };
+}
+
+function updateSopConfig(nextConfig, rigId) {
+    const targetRig = rigId || nextConfig?.rig_id || null;
+    const base = targetRig && rigSopProfiles.has(targetRig)
+        ? rigSopProfiles.get(targetRig)
+        : inMemorySopConfig;
+
+    const normalized = {
+        min_wob: Number(nextConfig?.min_wob ?? base.min_wob),
+        min_rpm: Number(nextConfig?.min_rpm ?? base.min_rpm),
+        min_flow: Number(nextConfig?.min_flow ?? base.min_flow),
+        max_conn_time: Number(nextConfig?.max_conn_time ?? base.max_conn_time)
+    };
+
+    if (targetRig) {
+        rigSopProfiles.set(targetRig, normalized);
+        upsertRigSop(targetRig, normalized);
+        return { ...normalized };
+    }
+
+    inMemorySopConfig = normalized;
     try {
         fs.writeFileSync(configPath, JSON.stringify(inMemorySopConfig, null, 2));
     } catch (error) {
@@ -292,7 +317,7 @@ function getQueueStatus() {
 async function processSingleBatch(data) {
     const modelName = process.env.OLLAMA_MODEL_NAME || "qwen2.5:1.5b";
     const endTimer = aiInferenceLatencyHistogram.startTimer({ model: modelName });
-    const sopConfig = getSopConfig();
+    const sopConfig = getSopConfig(data.metadata?.rig_id);
     const preCheck = evaluateSopDeterministic(data, sopConfig);
     try {
         const chain = getEvaluationChain(modelName);
@@ -352,6 +377,7 @@ async function processSingleBatch(data) {
         telemetryEvents.emit('assessment', enrichedResult);
         logAiDecision(data.metadata, "local-compute-0-cost", enrichedResult);
         await saveAiDecision(enrichedResult, data.metadata);
+        await dispatchIltAlert(enrichedResult);
         return enrichedResult;
     } catch (error) {
         endTimer({ status: 'error' });
@@ -393,6 +419,7 @@ async function processSingleBatch(data) {
         telemetryEvents.emit('assessment', fallbackResult);
         logAiDecision(data.metadata, "deterministic-sop-fallback", fallbackResult);
         await saveAiDecision(fallbackResult, data.metadata);
+        await dispatchIltAlert(fallbackResult);
         return fallbackResult;
     }
 }
@@ -455,6 +482,7 @@ module.exports = {
     getQueueStatus,
     telemetryEvents,
     getSopConfig,
+    getAllSopProfiles,
     updateSopConfig,
     DEFAULT_SOP_CONFIG
 };

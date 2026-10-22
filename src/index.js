@@ -4,17 +4,21 @@ const path = require('path');
 const {
     telemetryEvents,
     getSopConfig,
+    getAllSopProfiles,
     updateSopConfig,
     getQueueStatus,
     checkOllamaHealth
 } = require('./services/ai');
 const {
     pool,
+    getAllRigSops,
     getRecentAiDecisions,
     getRecentTelemetryBatches,
+    getHourlyIltSummary,
     checkDbHealth,
     getTelemetryStats
 } = require('./services/db');
+const { getRecentAlerts } = require('./utils/alerter');
 const { router: telemetryRouter } = require('./routes/telemetry');
 const { register } = require('./utils/metrics');
 
@@ -54,14 +58,26 @@ app.get('/metrics', async (req, res) => {
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/api/sops', (req, res) => {
-    res.json(getSopConfig());
+    res.json(getSopConfig(req.query.rig_id));
+});
+
+app.get('/api/sops/profiles', async (req, res) => {
+    const dbProfiles = await getAllRigSops();
+    const memoryProfiles = getAllSopProfiles();
+    res.json({
+        default: memoryProfiles.default,
+        rigs: memoryProfiles.rigs,
+        persisted_rigs: dbProfiles
+    });
 });
 
 app.post('/api/sops', (req, res) => {
-    const updated = updateSopConfig(req.body);
-    res.json({ status: 'updated', config: updated });
+    const rigId = req.query.rig_id || req.body?.rig_id || null;
+    const updated = updateSopConfig(req.body, rigId);
+    res.json({ status: 'updated', rig_id: rigId || 'default', config: updated });
 });
 
+// --- DECISIONS, DDR CSV EXPORT, BATCHES, ALERTS & STATS ---
 app.get('/api/decisions', async (req, res) => {
     const decisions = await getRecentAiDecisions({
         limit: req.query.limit,
@@ -72,6 +88,50 @@ app.get('/api/decisions', async (req, res) => {
     res.json({ decisions });
 });
 
+function escapeCsvCell(val) {
+    if (val === null || val === undefined) return '';
+    const str = String(val);
+    if (/[",\r\n]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+}
+
+app.get('/api/decisions/export', async (req, res) => {
+    const decisions = await getRecentAiDecisions({
+        limit: req.query.limit || 200,
+        rig_id: req.query.rig_id,
+        well_id: req.query.well_id,
+        is_ilt: req.query.is_ilt
+    });
+
+    if (req.query.format === 'json') {
+        res.setHeader('Content-Disposition', 'attachment; filename="witsml-ddr-decisions.json"');
+        return res.json({ exported_at: new Date().toISOString(), count: decisions.length, decisions });
+    }
+
+    const headers = [
+        'id',
+        'timestamp',
+        'rig_id',
+        'well_id',
+        'declared_op',
+        'actual_state',
+        'is_ilt',
+        'ilt_duration_seconds',
+        'confidence_score',
+        'justification'
+    ];
+    const lines = [headers.join(',')];
+    for (const row of decisions) {
+        lines.push(headers.map(h => escapeCsvCell(row[h])).join(','));
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="witsml-ddr-decisions.csv"');
+    return res.status(200).send(lines.join('\n') + '\n');
+});
+
 app.get('/api/batches', async (req, res) => {
     const batches = await getRecentTelemetryBatches({
         limit: req.query.limit,
@@ -80,9 +140,18 @@ app.get('/api/batches', async (req, res) => {
     res.json({ batches });
 });
 
+app.get('/api/alerts', (req, res) => {
+    res.json({ alerts: getRecentAlerts(req.query.limit) });
+});
+
 app.get('/api/stats', async (req, res) => {
     const stats = await getTelemetryStats();
     res.json({ ...stats, queue: getQueueStatus() });
+});
+
+app.get('/api/stats/hourly', async (req, res) => {
+    const buckets = await getHourlyIltSummary(req.query.hours);
+    res.json({ buckets });
 });
 
 // --- SERVER-SENT EVENTS (SSE) STREAM via EventEmitter ---
