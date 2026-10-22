@@ -11,6 +11,9 @@ services:
       - PORT=3000
       - OLLAMA_HOST=http://host.docker.internal:11434
       - DB_HOST=timescaledb
+      - DB_USER=postgres
+      - DB_PASSWORD=witsml_secure_pw
+      - DB_NAME=witsml_telemetry
     volumes:
       - ./logs:/usr/src/app/logs
     depends_on:
@@ -30,6 +33,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
   prometheus:
     image: prom/prometheus:latest
