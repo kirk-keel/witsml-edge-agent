@@ -72,14 +72,17 @@ node stream-simulator.js
 
 | Method | Path | Description |
 | :--- | :--- | :--- |
-| `GET` | `/health` | Service health check (`200 OK`) |
-| `GET` | `/metrics` | Prometheus metrics (`witsml_telemetry_batches_total`, `witsml_telemetry_points_total`, `witsml_ai_inference_duration_seconds`, `witsml_ilt_detections_total`, `witsml_ilt_duration_seconds_total`, `witsml_ai_decisions_total`) |
+| `GET` | `/health` | Liveness probe (`200 OK`) |
+| `GET` | `/ready` | Deep readiness probe checking live TimescaleDB latency, Ollama (`qwen2.5:1.5b`) reachability, and queue depth |
+| `GET` | `/metrics` | Prometheus metrics (`witsml_telemetry_batches_total`, `witsml_telemetry_points_total`, `witsml_ai_inference_duration_seconds`, `witsml_ilt_detections_total`, `witsml_ilt_duration_seconds_total`, `witsml_ai_decisions_total`, `witsml_ai_queue_depth`) |
 | `POST` | `/api/v1/telemetry` | Schema-validated WITSML window ingestion (`202 Accepted`) |
 | `POST` | `/api/witsml` | Legacy alias forwarded to the telemetry ingestion pipeline |
 | `GET` | `/api/sops` | Retrieve active SOP thresholds (`min_wob`, `min_rpm`, `min_flow`, `max_conn_time`) |
 | `POST` | `/api/sops` | Update runtime SOP thresholds without redeploying |
-| `GET` | `/api/decisions` | Retrieve recent AI rig state decisions from TimescaleDB (`?limit=25`) |
-| `GET` | `/api/stream` | Server-Sent Events (SSE) stream for live dashboard updates |
+| `GET` | `/api/decisions` | Retrieve recent AI rig state decisions from TimescaleDB (`?limit=25&rig_id=Rig-412&is_ilt=true`) |
+| `GET` | `/api/batches` | Retrieve recent raw WITSML telemetry windows from TimescaleDB (`?limit=10&rig_id=Rig-412`) |
+| `GET` | `/api/stats` | Aggregated KPI summary (`total_batches`, `total_decisions`, `ilt_count`, `total_ilt_seconds`, `avg_confidence`, `queue`) |
+| `GET` | `/api/stream` | Server-Sent Events (SSE) stream with 25s keep-alive heartbeats for live dashboard updates |
 
 ## Documentation
 
