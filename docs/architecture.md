@@ -6,20 +6,22 @@ The **WITSML Edge Agent** ingests high-frequency drilling rig sensor windows (WO
 
 ## Data Flow
 
-1. **Telemetry Ingestion (`POST /api/v1/telemetry`, `POST /api/v1/witsml/xml`, & `POST /api/witsml`):**
+1. **Telemetry Ingestion & Optional Edge API Key Guard (`POST /api/v1/telemetry`, `POST /api/v1/witsml/xml`, & `POST /api/witsml`):**
+   - Protected by `requireEdgeApiKey` (`src/utils/auth.js`): when `EDGE_API_KEY` is configured in the environment, all write (`POST`) routes require a matching `X-Edge-Key` or `Authorization: Bearer` header.
    - Incoming JSON payloads or WITSML v1.4.1.1 / v2.0 `<log>` XML payloads (`parseWitsmlXmlToTelemetry` in `src/utils/witsml-xml.js`) are validated synchronously against `telemetrySchema` (Zod) in `src/routes/telemetry.js`.
    - Invalid payloads return `400 Bad Request` immediately and increment `witsml_telemetry_batches_total{status="validation_error"}`.
    - Valid payloads increment `witsml_telemetry_batches_total{status="accepted"}` and `witsml_telemetry_points_total`, persist the raw JSONB window to the `telemetry_batches` hypertable in TimescaleDB, enqueue asynchronous AI analysis (`analyzeRigStateAsync`), and return `202 Accepted` so rig telemetry producers are never blocked by LLM inference latency.
 
-2. **Hybrid Deterministic + Local LLM Evaluation (`src/services/ai.js`):**
+2. **Drilling Mechanics, Financial Impact & Hybrid LLM Evaluation (`src/utils/mechanics.js`, `src/services/ai.js`):**
    - **FIFO Inference Queue:** Enqueues incoming telemetry windows with concurrency `1` (`drainInferenceQueue`) and tracks backpressure via the `witsml_ai_queue_depth` Prometheus gauge.
-   - **Deterministic SOP Pre-Check (`evaluateSopDeterministic`):** Reads active SOP thresholds (`min_wob`, `min_rpm`, `min_flow`, `max_conn_time`) from memory (`O(1)`) and evaluates `drilling`, `drilling_dysfunction`, `connection`, `circulating`, and `circulation_loss` states.
+   - **Deterministic SOP Pre-Check (`evaluateSopDeterministic`):** Reads active SOP thresholds (`min_wob`, `min_rpm`, `min_flow`, `max_conn_time`, `rig_day_rate_usd`) from memory (`O(1)`) and evaluates `drilling`, `drilling_dysfunction`, `connection`, `circulating`, and `circulation_loss` states.
+   - **Drilling Physics & ILT Cost Engine (`computeDrillingMechanics`):** Computes Rate of Penetration (`rop_fphr`), Teale's (1965) Mechanical Specific Energy (`mse_psi` / `mse_ksi`), standpipe pressure hydraulic health (`normal`, `washout_risk`, `packoff_risk`), and dollar cost of Invisible Lost Time (`ilt_cost_usd` based on `rig_day_rate_usd`, default `$72,000/day`).
    - **Cached LLM Chain & Inequality Sanitization:** Invokes local Ollama (`qwen2.5:1.5b`) with `temperature: 0`, `numCtx: 512`, `numPredict: 120`, `keepAlive: "24h"`, and compact window statistics (`compactTelemetryForPrompt`). Output is parsed via Zod `StructuredOutputParser` and verified by `sanitizeJustification` so small-model symbol inversions (`<` vs `>`) or boolean hallucinations never reach storage.
    - **Zero-Downtime Deterministic Failover:** If Ollama is unreachable or times out, `processSingleBatch` automatically falls back to the deterministic SOP assessment (`fallback: true`, `deterministic-sop-fallback`).
-   - **Metrics:** Records inference latency in `witsml_ai_inference_duration_seconds` and increments `witsml_ai_decisions_total`, `witsml_ilt_detections_total`, and `witsml_ilt_duration_seconds_total`.
+   - **Metrics:** Records inference latency in `witsml_ai_inference_duration_seconds`, updates `witsml_drilling_rop_fphr` and `witsml_drilling_mse_psi` gauges, and increments `witsml_ai_decisions_total`, `witsml_ilt_detections_total`, `witsml_ilt_duration_seconds_total`, and `witsml_ilt_cost_usd_total`.
 
 3. **Persistence, Query APIs & Real-Time Streaming (`src/services/db.js`, `src/utils/logger.js`, `src/index.js`):**
-   - Persists each enriched assessment (`rig_id`, `well_id`, `declared_op`, `actual_state`, `is_ilt`, `ilt_duration_seconds`, `confidence_score`, `justification`) to the `ai_decisions` hypertable in TimescaleDB.
+   - Persists each enriched assessment (`rig_id`, `well_id`, `declared_op`, `actual_state`, `is_ilt`, `ilt_duration_seconds`, `ilt_cost_usd`, `rop_fphr`, `mse_psi`, `hydraulic_status`, `confidence_score`, `justification`) to the `ai_decisions` hypertable in TimescaleDB.
    - Appends an immutable audit entry to `logs/llm-audit.jsonl`.
    - Broadcasts decisions over Server-Sent Events (`GET /api/stream`, with 25-second `: heartbeat` keep-alives) to the live web console (`public/index.html`).
    - Exposes `GET /api/decisions` (with `?rig_id=`, `?well_id=`, `?is_ilt=` filters), `GET /api/decisions/export` (RFC-4180 CSV & JSON shift DDR export), `GET /api/sops/profiles` (per-rig SOP thresholds persisted in `rig_sops`), `GET /api/alerts` (outbound webhook + local ILT alert log via `src/utils/alerter.js`), `GET /api/batches`, `GET /api/stats`, `GET /api/stats/hourly` (TimescaleDB `time_bucket` rollup), and `GET /ready`.

@@ -4,6 +4,7 @@ const { z } = require('zod');
 const { analyzeRigStateAsync } = require('../services/ai');
 const { telemetryIngestionCounter, telemetryPointsCounter } = require('../utils/metrics');
 const { parseWitsmlXmlToTelemetry } = require('../utils/witsml-xml');
+const { requireEdgeApiKey } = require('../utils/auth');
 
 const router = express.Router();
 
@@ -95,10 +96,11 @@ async function handleWitsmlXmlIngestion(req, res) {
     }
 }
 
-router.post('/api/v1/telemetry', handleTelemetryIngestion);
-router.post('/api/witsml', handleTelemetryIngestion);
+router.post('/api/v1/telemetry', requireEdgeApiKey, handleTelemetryIngestion);
+router.post('/api/witsml', requireEdgeApiKey, handleTelemetryIngestion);
 router.post(
     '/api/v1/witsml/xml',
+    requireEdgeApiKey,
     express.text({ type: ['application/xml', 'text/xml', 'text/plain'], limit: '2mb' }),
     handleWitsmlXmlIngestion
 );

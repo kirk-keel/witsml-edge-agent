@@ -17,14 +17,22 @@ CREATE TABLE IF NOT EXISTS ai_decisions (
     is_ilt BOOLEAN,
     ilt_duration_seconds INT,
     confidence_score NUMERIC,
-    justification TEXT
+    justification TEXT,
+    rop_fphr NUMERIC DEFAULT 0,
+    mse_psi NUMERIC DEFAULT 0,
+    hydraulic_status VARCHAR(50) DEFAULT 'normal',
+    ilt_cost_usd NUMERIC DEFAULT 0
 );
 SELECT create_hypertable('ai_decisions', 'timestamp', if_not_exists => TRUE);
 
 ALTER TABLE ai_decisions
     ADD COLUMN IF NOT EXISTS rig_id VARCHAR(50),
     ADD COLUMN IF NOT EXISTS well_id VARCHAR(50),
-    ADD COLUMN IF NOT EXISTS declared_op VARCHAR(50);
+    ADD COLUMN IF NOT EXISTS declared_op VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS rop_fphr NUMERIC DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS mse_psi NUMERIC DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS hydraulic_status VARCHAR(50) DEFAULT 'normal',
+    ADD COLUMN IF NOT EXISTS ilt_cost_usd NUMERIC DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS rig_sops (
     rig_id VARCHAR(50) PRIMARY KEY,
@@ -32,8 +40,12 @@ CREATE TABLE IF NOT EXISTS rig_sops (
     min_rpm NUMERIC NOT NULL DEFAULT 20,
     min_flow NUMERIC NOT NULL DEFAULT 100,
     max_conn_time INT NOT NULL DEFAULT 180,
+    rig_day_rate_usd NUMERIC NOT NULL DEFAULT 72000,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE rig_sops
+    ADD COLUMN IF NOT EXISTS rig_day_rate_usd NUMERIC NOT NULL DEFAULT 72000;
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_batches_rig_time ON telemetry_batches (rig_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_decisions_rig_time ON ai_decisions (rig_id, timestamp DESC);

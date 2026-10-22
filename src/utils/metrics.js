@@ -43,6 +43,13 @@ const iltDurationSecondsCounter = new client.Counter({
     registers: [register]
 });
 
+const iltCostUsdCounter = new client.Counter({
+    name: 'witsml_ilt_cost_usd_total',
+    help: 'Cumulative financial cost ($ USD) of Invisible Lost Time (ILT) detected',
+    labelNames: ['rig_id', 'well_id', 'actual_state'],
+    registers: [register]
+});
+
 const aiDecisionsCounter = new client.Counter({
     name: 'witsml_ai_decisions_total',
     help: 'Total number of AI rig state decisions recorded',
@@ -53,6 +60,20 @@ const aiDecisionsCounter = new client.Counter({
 const aiQueueDepthGauge = new client.Gauge({
     name: 'witsml_ai_queue_depth',
     help: 'Current number of telemetry batches waiting or actively running in the AI inference queue',
+    registers: [register]
+});
+
+const drillingRopGauge = new client.Gauge({
+    name: 'witsml_drilling_rop_fphr',
+    help: 'Latest calculated Rate of Penetration (ROP) in ft/hr',
+    labelNames: ['rig_id', 'well_id'],
+    registers: [register]
+});
+
+const drillingMseGauge = new client.Gauge({
+    name: 'witsml_drilling_mse_psi',
+    help: 'Latest calculated Mechanical Specific Energy (MSE) in psi',
+    labelNames: ['rig_id', 'well_id'],
     registers: [register]
 });
 
@@ -70,7 +91,10 @@ module.exports = {
     aiInferenceLatencyHistogram,
     iltDetectionCounter,
     iltDurationSecondsCounter,
+    iltCostUsdCounter,
     aiDecisionsCounter,
     aiQueueDepthGauge,
+    drillingRopGauge,
+    drillingMseGauge,
     alertWebhooksCounter
 };

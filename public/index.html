@@ -21,16 +21,17 @@
         .btn-danger:hover { background: #dc2626; color: #fff; }
         .btn-export { border-color: #10b981; color: #10b981; }
         .btn-export:hover { background: #059669; color: #fff; }
-        .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
+        .kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 14px; }
         .kpi-card { background: #1e293b; border: 1px solid #334155; padding: 12px; border-radius: 8px; text-align: center; }
         .kpi-label { color: #94a3b8; font-size: 11px; margin-bottom: 4px; text-transform: uppercase; }
         .kpi-value { font-size: 22px; font-weight: bold; color: #f8fafc; }
         .kpi-value.ilt { color: #ef4444; }
         .kpi-value.ok { color: #10b981; }
-        .edr-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 18px; background: #0b1120; border: 1px solid #1e293b; padding: 10px 14px; border-radius: 8px; }
+        .kpi-value.cost { color: #f59e0b; }
+        .edr-strip { display: grid; grid-template-columns: repeat(9, 1fr); gap: 10px; margin-bottom: 18px; background: #0b1120; border: 1px solid #1e293b; padding: 10px 14px; border-radius: 8px; }
         .edr-cell { text-align: center; }
         .edr-name { font-size: 10px; color: #64748b; text-transform: uppercase; }
-        .edr-val { font-size: 15px; color: #38bdf8; font-weight: bold; margin-top: 2px; }
+        .edr-val { font-size: 14px; color: #38bdf8; font-weight: bold; margin-top: 2px; }
         .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
         .panel { background: #1e293b; border: 1px solid #334155; padding: 20px; border-radius: 8px; }
         .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -38,10 +39,10 @@
         .filter-group { display: flex; gap: 6px; }
         .btn-filter { background: #0f172a; color: #94a3b8; border: 1px solid #334155; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px; }
         .btn-filter.active { background: #0284c7; color: #fff; border-color: #38bdf8; }
-        input, select { background: #0f172a; color: #10b981; border: 1px solid #475569; padding: 8px; width: 100%; margin-bottom: 15px; font-family: monospace; }
+        input, select { background: #0f172a; color: #10b981; border: 1px solid #475569; padding: 8px; width: 100%; margin-bottom: 12px; font-family: monospace; }
         button.primary { background: #0284c7; color: white; border: none; padding: 10px 15px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; font-family: monospace; }
         button.primary:hover { background: #0369a1; }
-        #live-feed { height: 400px; overflow-y: auto; background: #000; padding: 15px; border-radius: 4px; border: 1px solid #334155; }
+        #live-feed { height: 420px; overflow-y: auto; background: #000; padding: 15px; border-radius: 4px; border: 1px solid #334155; }
         .log-normal { color: #10b981; margin-bottom: 8px; }
         .log-ilt { color: #ef4444; font-weight: bold; margin-bottom: 8px; }
     </style>
@@ -81,6 +82,10 @@
             <div class="kpi-value ilt" id="kpi-ilt-sec">0s</div>
         </div>
         <div class="kpi-card">
+            <div class="kpi-label">Estimated ILT Cost</div>
+            <div class="kpi-value cost" id="kpi-ilt-cost">$0.00</div>
+        </div>
+        <div class="kpi-card">
             <div class="kpi-label">AI Inference Queue</div>
             <div class="kpi-value" id="kpi-queue">0</div>
         </div>
@@ -89,6 +94,8 @@
     <div class="edr-strip">
         <div class="edr-cell"><div class="edr-name">Active Op</div><div class="edr-val" id="edr-op">--</div></div>
         <div class="edr-cell"><div class="edr-name">Hole Depth</div><div class="edr-val" id="edr-depth">-- ft</div></div>
+        <div class="edr-cell"><div class="edr-name">ROP</div><div class="edr-val" id="edr-rop">-- ft/hr</div></div>
+        <div class="edr-cell"><div class="edr-name">MSE</div><div class="edr-val" id="edr-mse">-- ksi</div></div>
         <div class="edr-cell"><div class="edr-name">WOB</div><div class="edr-val" id="edr-wob">-- klbs</div></div>
         <div class="edr-cell"><div class="edr-name">RPM</div><div class="edr-val" id="edr-rpm">--</div></div>
         <div class="edr-cell"><div class="edr-name">Flow In</div><div class="edr-val" id="edr-flow">-- gpm</div></div>
@@ -98,7 +105,7 @@
 
     <div class="grid">
         <div class="panel">
-            <h3>SOP Firewall Settings</h3>
+            <h3>SOP & Spread Cost Settings</h3>
             <label>Rig Profile:</label>
             <select id="sop-rig" onchange="loadSopForRig()">
                 <option value="">Default (All Rigs)</option>
@@ -113,6 +120,8 @@
             <input type="number" id="flow">
             <label>Max Connection Time (s):</label>
             <input type="number" id="conn">
+            <label>Rig Spread Rate ($ USD/day):</label>
+            <input type="number" id="dayrate">
             <button class="primary" onclick="saveSOP()">Deploy SOPs to Edge Model</button>
         </div>
         <div class="panel">
@@ -141,6 +150,7 @@
                 document.getElementById('rpm').value = data.min_rpm;
                 document.getElementById('flow').value = data.min_flow;
                 document.getElementById('conn').value = data.max_conn_time;
+                document.getElementById('dayrate').value = data.rig_day_rate_usd ?? 72000;
             });
         }
         loadSopForRig();
@@ -190,7 +200,14 @@
                     document.getElementById('kpi-decisions').textContent = stats.total_decisions ?? 0;
                     document.getElementById('kpi-ilt').textContent = stats.ilt_count ?? 0;
                     document.getElementById('kpi-ilt-sec').textContent = `${stats.total_ilt_seconds ?? 0}s`;
+                    document.getElementById('kpi-ilt-cost').textContent = `$${Number(stats.total_ilt_cost_usd ?? 0).toFixed(2)}`;
                     document.getElementById('kpi-queue').textContent = stats.queue?.total_pending ?? 0;
+                    if (stats.avg_rop_fphr) {
+                        document.getElementById('edr-rop').textContent = `${stats.avg_rop_fphr} ft/hr`;
+                    }
+                    if (stats.avg_mse_psi) {
+                        document.getElementById('edr-mse').textContent = `${(stats.avg_mse_psi / 1000).toFixed(1)} ksi`;
+                    }
                 })
                 .catch(() => {});
             refreshLatestBatch();
@@ -206,7 +223,8 @@
                     min_wob: Number(document.getElementById('wob').value),
                     min_rpm: Number(document.getElementById('rpm').value),
                     min_flow: Number(document.getElementById('flow').value),
-                    max_conn_time: Number(document.getElementById('conn').value)
+                    max_conn_time: Number(document.getElementById('conn').value),
+                    rig_day_rate_usd: Number(document.getElementById('dayrate').value)
                 })
             }).then(() => alert(`SOPs deployed for ${rigId || 'Default (All Rigs)'}!`));
         }
@@ -285,10 +303,12 @@
             }
             const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
             const cssClass = data.is_ilt ? 'log-ilt' : 'log-normal';
-            const status = data.is_ilt ? `ILT DETECTED (${data.ilt_duration_seconds || 0}s)` : 'NORMAL';
+            const costStr = data.is_ilt && data.ilt_cost_usd ? ` | $${Number(data.ilt_cost_usd).toFixed(2)}` : '';
+            const mechStr = data.rop_fphr ? ` [ROP:${data.rop_fphr}ft/hr MSE:${((data.mse_psi || 0) / 1000).toFixed(1)}ksi]` : '';
+            const status = data.is_ilt ? `ILT DETECTED (${data.ilt_duration_seconds || 0}s${costStr})` : 'NORMAL';
             const rigTag = data.rig_id ? `[${data.rig_id}] ` : '';
 
-            feed.innerHTML += `<div class="${cssClass}">[${time}] ${rigTag}[${status}] ${data.justification}</div>`;
+            feed.innerHTML += `<div class="${cssClass}">[${time}] ${rigTag}[${status}]${mechStr} ${data.justification}</div>`;
             feed.scrollTop = feed.scrollHeight;
         }
 

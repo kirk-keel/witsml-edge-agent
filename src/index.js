@@ -19,6 +19,7 @@ const {
     getTelemetryStats
 } = require('./services/db');
 const { getRecentAlerts } = require('./utils/alerter');
+const { requireEdgeApiKey } = require('./utils/auth');
 const { router: telemetryRouter } = require('./routes/telemetry');
 const { register } = require('./utils/metrics');
 
@@ -71,7 +72,7 @@ app.get('/api/sops/profiles', async (req, res) => {
     });
 });
 
-app.post('/api/sops', (req, res) => {
+app.post('/api/sops', requireEdgeApiKey, (req, res) => {
     const rigId = req.query.rig_id || req.body?.rig_id || null;
     const updated = updateSopConfig(req.body, rigId);
     res.json({ status: 'updated', rig_id: rigId || 'default', config: updated });
@@ -119,6 +120,10 @@ app.get('/api/decisions/export', async (req, res) => {
         'actual_state',
         'is_ilt',
         'ilt_duration_seconds',
+        'ilt_cost_usd',
+        'rop_fphr',
+        'mse_psi',
+        'hydraulic_status',
         'confidence_score',
         'justification'
     ];

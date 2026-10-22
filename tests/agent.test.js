@@ -10,6 +10,7 @@ const {
     sanitizeJustification,
     compactTelemetryForPrompt
 } = require('../src/services/ai');
+const { computeDrillingMechanics } = require('../src/utils/mechanics');
 
 const sopFilePath = path.join(__dirname, '../src/sop-config.json');
 
@@ -54,6 +55,56 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.match(text, /witsml_ilt_duration_seconds_total/);
         assert.match(text, /witsml_ai_decisions_total/);
         assert.match(text, /witsml_ai_queue_depth/);
+        assert.match(text, /witsml_ilt_cost_usd_total/);
+        assert.match(text, /witsml_drilling_rop_fphr/);
+        assert.match(text, /witsml_drilling_mse_psi/);
+    });
+
+    it('computeDrillingMechanics computes ROP, Teale MSE, hydraulic status, and ILT cost', () => {
+        const start = Date.now();
+        const mech = computeDrillingMechanics(
+            {
+                telemetry: [
+                    {
+                        timestamp: new Date(start).toISOString(),
+                        hole_depth_ft: 10000,
+                        bit_depth_ft: 10000,
+                        wob_klbs: 20,
+                        rpm: 120,
+                        flow_in_gpm: 400,
+                        spp_psi: 2800
+                    },
+                    {
+                        timestamp: new Date(start + 300000).toISOString(),
+                        hole_depth_ft: 10008,
+                        bit_depth_ft: 10008,
+                        wob_klbs: 20,
+                        rpm: 120,
+                        flow_in_gpm: 400,
+                        spp_psi: 2800
+                    }
+                ]
+            },
+            { rig_day_rate_usd: 72000 },
+            120
+        );
+        assert.equal(mech.rop_fphr, 96);
+        assert.ok(mech.mse_psi > 1000);
+        assert.equal(mech.hydraulic_status, 'normal');
+        assert.equal(mech.ilt_cost_usd, 100);
+
+        const washout = computeDrillingMechanics(
+            {
+                telemetry: [
+                    { hole_depth_ft: 10000, wob_klbs: 18, rpm: 110, flow_in_gpm: 420, spp_psi: 900 },
+                    { hole_depth_ft: 10005, wob_klbs: 18, rpm: 110, flow_in_gpm: 420, spp_psi: 900 }
+                ]
+            },
+            { rig_day_rate_usd: 72000 },
+            0
+        );
+        assert.equal(washout.hydraulic_status, 'washout_risk');
+        assert.ok(washout.rop_fphr > 0);
     });
 
     it('evaluateSopDeterministic prevents false-positive ILT on normal drilling and flags connection ILT', () => {
@@ -164,7 +215,8 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
             min_wob: 12,
             min_rpm: 40,
             min_flow: 250,
-            max_conn_time: 210
+            max_conn_time: 210,
+            rig_day_rate_usd: 72000
         });
 
         const rigSopRes = await fetch(`${baseUrl}/api/sops`, {
@@ -324,7 +376,10 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(csvRes.status, 200);
         assert.match(csvRes.headers.get('content-type'), /text\/csv/);
         const csvText = await csvRes.text();
-        assert.match(csvText, /^id,timestamp,rig_id,well_id,declared_op,actual_state,is_ilt,ilt_duration_seconds,confidence_score,justification/);
+        assert.match(
+            csvText,
+            /^id,timestamp,rig_id,well_id,declared_op,actual_state,is_ilt,ilt_duration_seconds,ilt_cost_usd,rop_fphr,mse_psi,hydraulic_status,confidence_score,justification/
+        );
 
         const alertsRes = await fetch(`${baseUrl}/api/alerts`);
         assert.equal(alertsRes.status, 200);
@@ -335,5 +390,29 @@ describe('WITSML Edge Agent API & Telemetry Pipeline', () => {
         assert.equal(hourlyRes.status, 200);
         const hourlyBody = await hourlyRes.json();
         assert.ok(Array.isArray(hourlyBody.buckets));
+    });
+
+    it('requireEdgeApiKey enforces X-Edge-Key when EDGE_API_KEY is configured', async () => {
+        process.env.EDGE_API_KEY = 'secret-edge-token';
+        try {
+            const unauthRes = await fetch(`${baseUrl}/api/sops`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ min_wob: 10 })
+            });
+            assert.equal(unauthRes.status, 401);
+
+            const authRes = await fetch(`${baseUrl}/api/sops`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Edge-Key': 'secret-edge-token'
+                },
+                body: JSON.stringify({ min_wob: 10 })
+            });
+            assert.equal(authRes.status, 200);
+        } finally {
+            delete process.env.EDGE_API_KEY;
+        }
     });
 });

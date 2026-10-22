@@ -8,12 +8,16 @@ const { StructuredOutputParser } = require("@langchain/core/output_parsers");
 const { z } = require("zod");
 const { logAiDecision } = require('../utils/logger');
 const { dispatchIltAlert } = require('../utils/alerter');
+const { computeDrillingMechanics } = require('../utils/mechanics');
 const {
     aiInferenceLatencyHistogram,
     iltDetectionCounter,
     iltDurationSecondsCounter,
+    iltCostUsdCounter,
     aiDecisionsCounter,
-    aiQueueDepthGauge
+    aiQueueDepthGauge,
+    drillingRopGauge,
+    drillingMseGauge
 } = require('../utils/metrics');
 
 const telemetryEvents = new EventEmitter();
@@ -22,7 +26,8 @@ const DEFAULT_SOP_CONFIG = Object.freeze({
     min_wob: 5,
     min_rpm: 20,
     min_flow: 100,
-    max_conn_time: 180
+    max_conn_time: 180,
+    rig_day_rate_usd: 72000
 });
 
 const configPath = path.join(__dirname, '../sop-config.json');
@@ -66,7 +71,8 @@ function updateSopConfig(nextConfig, rigId) {
         min_wob: Number(nextConfig?.min_wob ?? base.min_wob),
         min_rpm: Number(nextConfig?.min_rpm ?? base.min_rpm),
         min_flow: Number(nextConfig?.min_flow ?? base.min_flow),
-        max_conn_time: Number(nextConfig?.max_conn_time ?? base.max_conn_time)
+        max_conn_time: Number(nextConfig?.max_conn_time ?? base.max_conn_time),
+        rig_day_rate_usd: Number(nextConfig?.rig_day_rate_usd ?? base.rig_day_rate_usd ?? 72000)
     };
 
     if (targetRig) {
@@ -347,6 +353,10 @@ async function processSingleBatch(data) {
         const is_ilt = preCheck.is_ilt;
         const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
         const justification = sanitizeJustification(rawResult.justification, preCheck);
+        const mechanics = computeDrillingMechanics(data, sopConfig, ilt_duration_seconds);
+
+        drillingRopGauge.set({ rig_id, well_id }, mechanics.rop_fphr);
+        drillingMseGauge.set({ rig_id, well_id }, mechanics.mse_psi);
 
         aiDecisionsCounter.inc({
             rig_id,
@@ -359,6 +369,9 @@ async function processSingleBatch(data) {
             iltDetectionCounter.inc({ rig_id, well_id, actual_state });
             if (ilt_duration_seconds > 0) {
                 iltDurationSecondsCounter.inc({ rig_id, well_id, actual_state }, ilt_duration_seconds);
+                if (mechanics.ilt_cost_usd > 0) {
+                    iltCostUsdCounter.inc({ rig_id, well_id, actual_state }, mechanics.ilt_cost_usd);
+                }
             }
         }
 
@@ -368,6 +381,11 @@ async function processSingleBatch(data) {
             ilt_duration_seconds,
             confidence_score: normalizedConfidence,
             justification,
+            rop_fphr: mechanics.rop_fphr,
+            mse_psi: mechanics.mse_psi,
+            mse_ksi: mechanics.mse_ksi,
+            hydraulic_status: mechanics.hydraulic_status,
+            ilt_cost_usd: mechanics.ilt_cost_usd,
             rig_id,
             well_id,
             declared_op: data.metadata.active_operation,
@@ -388,6 +406,10 @@ async function processSingleBatch(data) {
         const actual_state = preCheck.actual_state || 'unknown';
         const is_ilt = preCheck.is_ilt;
         const ilt_duration_seconds = is_ilt ? preCheck.ilt_duration_seconds : 0;
+        const mechanics = computeDrillingMechanics(data, sopConfig, ilt_duration_seconds);
+
+        drillingRopGauge.set({ rig_id, well_id }, mechanics.rop_fphr);
+        drillingMseGauge.set({ rig_id, well_id }, mechanics.mse_psi);
 
         aiDecisionsCounter.inc({
             rig_id,
@@ -400,6 +422,9 @@ async function processSingleBatch(data) {
             iltDetectionCounter.inc({ rig_id, well_id, actual_state });
             if (ilt_duration_seconds > 0) {
                 iltDurationSecondsCounter.inc({ rig_id, well_id, actual_state }, ilt_duration_seconds);
+                if (mechanics.ilt_cost_usd > 0) {
+                    iltCostUsdCounter.inc({ rig_id, well_id, actual_state }, mechanics.ilt_cost_usd);
+                }
             }
         }
 
@@ -409,6 +434,11 @@ async function processSingleBatch(data) {
             ilt_duration_seconds,
             confidence_score: 1.0,
             justification: `[Deterministic SOP Failover] ${preCheck.factual_justification}`,
+            rop_fphr: mechanics.rop_fphr,
+            mse_psi: mechanics.mse_psi,
+            mse_ksi: mechanics.mse_ksi,
+            hydraulic_status: mechanics.hydraulic_status,
+            ilt_cost_usd: mechanics.ilt_cost_usd,
             rig_id,
             well_id,
             declared_op: data.metadata.active_operation,
