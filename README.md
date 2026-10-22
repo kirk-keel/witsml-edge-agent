@@ -1,14 +1,14 @@
 # WITSML Edge Agent
 
-Real-time WITSML drilling telemetry analysis with local LLM inference — Invisible Lost Time (ILT) detection, live SSE dashboard, and zero cloud cost.
+Real-time WITSML drilling telemetry analysis with local LLM inference — Invisible Lost Time (ILT) detection, TimescaleDB hypertable persistence, Prometheus metrics, Grafana observability, live SSE dashboard, and zero cloud inference cost.
 
 ## What it is
 
-An Express service that ingests WITSML-style drilling telemetry, validates sensor windows with strict Zod schemas, analyzes operations against runtime-configurable Standard Operating Procedures (SOPs) using a locally hosted LLM (LangChain + Ollama), and streams structured assessments to a live dashboard over Server-Sent Events (SSE). SOP thresholds are configurable at runtime — no redeploy required.
+An Express edge agent that ingests WITSML-style drilling telemetry, validates sensor windows with strict Zod schemas, persists raw telemetry batches and AI assessments into TimescaleDB hypertables, analyzes operations against runtime-configurable Standard Operating Procedures (SOPs) using a locally hosted LLM (`LangChain` + `Ollama` running `qwen2.5:1.5b`), exposes Prometheus metrics via `prom-client`, and streams structured assessments to both a live SSE web dashboard and pre-provisioned Grafana dashboards.
 
 ## Why it exists
 
-Invisible Lost Time (ILT) is drilling and connection time lost to operational inefficiency that goes unflagged in the moment. Cloud LLM analysis introduces satellite latency, data egress risks, and token costs; this edge agent runs entirely on local rig/homelab hardware over Tailscale, for free.
+Invisible Lost Time (ILT) is drilling and connection time lost to operational inefficiency that goes unflagged in the moment. Cloud LLM analysis introduces satellite latency, data egress risks, and recurring token costs; this edge agent runs entirely on local rig or edge server hardware with full time-series persistence and observability.
 
 ## Architecture
 
@@ -16,28 +16,55 @@ Invisible Lost Time (ILT) is drilling and connection time lost to operational in
 flowchart LR
     S["WITSML Simulator / Edge Aggregator"] -->|"POST /api/v1/telemetry"| R["Zod Schema Validator"]
     R -->|"202 Accepted"| S
-    R --> A["AI Service (LangChain + Ollama)"]
+    R -->|"INSERT batch"| T[("TimescaleDB\ntelemetry_batches & ai_decisions")]
+    R -->|"Async Queue"| A["AI Service\n(LangChain + Ollama qwen2.5:1.5b)"]
     C["SOP Config API (/api/sops)"] -.->|"Runtime Thresholds"| A
-    A --> Z["Zod-Validated Structured Output"]
-    Z -->|"EventEmitter -> SSE (/api/stream)"| D["Live Rig Dashboard"]
+    A --> Z["Zod Structured Output"]
+    Z -->|"INSERT decision"| T
+    Z -->|"EventEmitter -> SSE (/api/stream)"| D["Live Rig Web Dashboard"]
+    T -->|"GET /api/decisions"| D
     Z --> L["Append-Only JSONL Audit Log"]
+    M["Prometheus (/metrics)"] -->|"Scrape 15s"| P[("Prometheus :9090")]
+    P --> G["Grafana :3001\n(WITSML Overview Dashboard)"]
+    T --> G
 ```
 
 ## Quick Start
 
+### Docker Compose Stack (Recommended)
+
 ```bash
 git clone https://github.com/kirk-keel/witsml-edge-agent.git
 cd witsml-edge-agent
+docker build --network=host -t witsml-edge-agent-witsml-agent .
+docker compose up -d
+```
+
+| Service | Container | Host Port | Description |
+| :--- | :--- | :--- | :--- |
+| **WITSML Edge Agent** | `witsml-agent` | `3000` | Express API, SSE stream, live SOP dashboard, and `/metrics` |
+| **TimescaleDB** | `timescaledb` | `5432` | PostgreSQL 15 + TimescaleDB (`telemetry_batches`, `ai_decisions` hypertables) |
+| **Prometheus** | `prometheus` | `9090` | Scrapes `witsml-agent:3000/metrics` every 15s |
+| **Grafana** | `grafana` | `3001` | Pre-provisioned `Prometheus` + `TimescaleDB` datasources and WITSML Overview dashboard |
+
+### Local Node Development
+
+```bash
 cp .env.example .env
 npm install
 npm start
 ```
 
-### Simulate WITSML Telemetry
+### Simulate WITSML Telemetry & Run Tests
 
 ```bash
+# Run automated API & metrics integration tests:
+npm test
+
+# Dispatch a single test payload:
 node scripts/test-payload.js
-# or run the multi-window stream simulator:
+
+# Run the multi-window WITSML stream simulator:
 node stream-simulator.js
 ```
 
@@ -45,11 +72,19 @@ node stream-simulator.js
 
 | Method | Path | Description |
 | :--- | :--- | :--- |
+| `GET` | `/health` | Service health check (`200 OK`) |
+| `GET` | `/metrics` | Prometheus metrics (`witsml_telemetry_batches_total`, `witsml_telemetry_points_total`, `witsml_ai_inference_duration_seconds`, `witsml_ilt_detections_total`, `witsml_ilt_duration_seconds_total`, `witsml_ai_decisions_total`) |
 | `POST` | `/api/v1/telemetry` | Schema-validated WITSML window ingestion (`202 Accepted`) |
 | `POST` | `/api/witsml` | Legacy alias forwarded to the telemetry ingestion pipeline |
-| `GET` | `/api/sops` | Retrieve active SOP thresholds (returns safe in-memory defaults if uninitialized) |
-| `POST` | `/api/sops` | Update runtime SOP thresholds (`min_wob`, `min_rpm`, `min_flow`, `max_conn_time`) |
+| `GET` | `/api/sops` | Retrieve active SOP thresholds (`min_wob`, `min_rpm`, `min_flow`, `max_conn_time`) |
+| `POST` | `/api/sops` | Update runtime SOP thresholds without redeploying |
+| `GET` | `/api/decisions` | Retrieve recent AI rig state decisions from TimescaleDB (`?limit=25`) |
 | `GET` | `/api/stream` | Server-Sent Events (SSE) stream for live dashboard updates |
+
+## Documentation
+
+- [System Architecture](docs/architecture.md)
+- [ADR 0001: Edge AI & Time-Series Observability Stack](docs/adr/0001-architecture.md)
 
 ## License
 
