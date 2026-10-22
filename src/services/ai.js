@@ -125,10 +125,18 @@ Output raw JSON. Your 'justification' field must strictly state the factual math
             }
         }
 
-        telemetryEvents.emit('assessment', result);
-        logAiDecision(data.metadata, "local-compute-0-cost", result);
-        await saveAiDecision(result);
-        return result;
+        const enrichedResult = {
+            ...result,
+            rig_id,
+            well_id,
+            declared_op: data.metadata.active_operation,
+            timestamp: new Date().toISOString()
+        };
+
+        telemetryEvents.emit('assessment', enrichedResult);
+        logAiDecision(data.metadata, "local-compute-0-cost", enrichedResult);
+        await saveAiDecision(enrichedResult, data.metadata);
+        return enrichedResult;
     } catch (error) {
         endTimer({ status: 'error' });
         console.error("[Agent Error] AI Processing Failed:", error);

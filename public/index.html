@@ -59,17 +59,37 @@
             }).then(() => alert('SOPs successfully deployed to Edge AI memory!'));
         }
 
+        function appendDecision(data, clearPlaceholder = false) {
+            const feed = document.getElementById('live-feed');
+            if (clearPlaceholder || feed.textContent === 'Waiting for WITSML telemetry...') {
+                feed.innerHTML = '';
+            }
+            const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            const cssClass = data.is_ilt ? 'log-ilt' : 'log-normal';
+            const status = data.is_ilt ? 'ILT DETECTED' : 'NORMAL';
+            const rigTag = data.rig_id ? `[${data.rig_id}] ` : '';
+
+            feed.innerHTML += `<div class="${cssClass}">[${time}] ${rigTag}[${status}] ${data.justification}</div>`;
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        // Hydrate recent decisions from TimescaleDB on page load
+        fetch('/api/decisions?limit=20')
+            .then(res => res.json())
+            .then(({ decisions }) => {
+                if (Array.isArray(decisions) && decisions.length > 0) {
+                    const feed = document.getElementById('live-feed');
+                    feed.innerHTML = '';
+                    decisions.slice().reverse().forEach(d => appendDecision(d));
+                }
+            })
+            .catch(() => {});
+
         // Connect to Server-Sent Events (SSE) for the live log stream
         const source = new EventSource('/api/stream');
         source.onmessage = function(event) {
             const data = JSON.parse(event.data);
-            const feed = document.getElementById('live-feed');
-            const time = new Date().toLocaleTimeString();
-            const cssClass = data.is_ilt ? 'log-ilt' : 'log-normal';
-            const status = data.is_ilt ? 'ILT DETECTED' : 'NORMAL';
-            
-            feed.innerHTML += `<div class="${cssClass}">[${time}] [${status}] ${data.justification}</div>`;
-            feed.scrollTop = feed.scrollHeight; 
+            appendDecision(data);
         };
     </script>
 </body>

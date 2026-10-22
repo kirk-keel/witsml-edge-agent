@@ -1,0 +1,265 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Telemetry Batches Ingested",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(witsml_telemetry_batches_total{status=\"accepted\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Sensor Data Points Ingested",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(witsml_telemetry_points_total) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "ILT Events Detected",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(witsml_ilt_detections_total) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 60 },
+              { "color": "red", "value": 180 }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Cumulative ILT Duration",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(witsml_ilt_duration_seconds_total) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "title": "Drilling Parameters: WOB (klbs), RPM, Flow In (gpm)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT (pt->>'timestamp')::timestamptz AS time, (pt->>'wob_klbs')::numeric AS \"WOB (klbs)\", (pt->>'rpm')::numeric AS \"RPM\", (pt->>'flow_in_gpm')::numeric AS \"Flow In (gpm)\" FROM telemetry_batches tb, jsonb_array_elements(tb.payload->'telemetry') AS pt WHERE $__timeFilter((pt->>'timestamp')::timestamptz) ORDER BY 1;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "title": "Ollama (qwen2.5:1.5b) AI Inference Latency",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "witsml_ai_inference_duration_seconds_sum / witsml_ai_inference_duration_seconds_count",
+          "legendFormat": "Avg Latency ({{model}})",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(witsml_ai_inference_duration_seconds_bucket[5m])) by (le, model))",
+          "legendFormat": "p95 Latency ({{model}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "justification" },
+            "properties": [{ "id": "custom.width", "value": 420 }]
+          }
+        ]
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 12 },
+      "id": 7,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "timestamp" }]
+      },
+      "title": "Recent Edge AI Decisions & ILT Justifications (TimescaleDB)",
+      "type": "table",
+      "targets": [
+        {
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "P40AE60E18F02DE32" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT timestamp, rig_id, well_id, declared_op, actual_state, is_ilt, ilt_duration_seconds, confidence_score, justification FROM ai_decisions ORDER BY timestamp DESC LIMIT 50;",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["witsml", "edge-ai", "timescaledb", "prometheus"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "WITSML Edge AI & Rig Telemetry Overview",
+  "uid": "witsml-edge-overview",
+  "version": 1
+}
