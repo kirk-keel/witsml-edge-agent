@@ -7,6 +7,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OLLAMA_HOST=http://host.docker.internal:11434
       - DB_HOST=timescaledb
       - DB_USER=postgres

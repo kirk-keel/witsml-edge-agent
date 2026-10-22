@@ -4,5 +4,4 @@ node_modules
 logs
 grafana
 docs
-.env
 *.md
