@@ -95,6 +95,20 @@ node stream-simulator.js --continuous
 | `POST` | `/api/cloud-sync/trigger` | Trigger immediate Rig-to-Cloud batch sync |
 | `GET` | `/api/stream` | Server-Sent Events (SSE) stream with 25s keep-alive heartbeats for live dashboard updates |
 
+## Environment Variables (`.env`)
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PORT` | `3000` | HTTP server port |
+| `DB_HOST` / `DB_NAME` | `timescaledb` / `witsml_telemetry` | TimescaleDB connection host and database |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Local Ollama inference server URL |
+| `OLLAMA_MODEL_NAME` | `qwen2.5:1.5b` | Local Ollama model tag |
+| `EDGE_API_KEY` | *(optional)* | Enforces `X-Edge-Key` or `Bearer` auth on `POST` routes when set |
+| `EDGE_RATE_LIMIT_PER_MIN` | `300` | Sliding-window max ingestion requests per minute per client IP |
+| `ALERT_WEBHOOK_URL` | *(optional)* | Outbound Slack/Teams/PagerDuty webhook URL for ILT & Well Control alerts |
+| `ALERT_MIN_ILT_SECONDS` | `60` | Minimum ILT duration in seconds before dispatching an ILT alert |
+| `CLOUD_SYNC_URL` | *(optional)* | Corporate endpoint URL for Rig-to-Cloud incremental batch replication |
+
 ## Documentation
 
 - [System Architecture](docs/architecture.md)
